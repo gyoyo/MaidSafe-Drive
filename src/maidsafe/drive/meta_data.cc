@@ -120,13 +120,16 @@ MetaData::MetaData()
       last_access_time(),
       last_write_time(),
       data_map(),
-      directory_id() {}
+      directory_id(),
+      notes(),
+      lock_id() {}
 #else
       attributes(),
       link_to(),
       data_map(),
       directory_id(),
-      notes() {
+      notes(),
+      lock_id() {
   attributes.st_gid = getgid();
   attributes.st_uid = getuid();
   attributes.st_mode = 0644;
@@ -145,7 +148,8 @@ MetaData::MetaData(const fs::path &name, bool is_directory)
       last_write_time(),
       data_map(is_directory ? nullptr : std::make_shared<encrypt::DataMap>()),
       directory_id(is_directory ? std::make_shared<DirectoryId>(RandomString(64)) : nullptr),
-      notes() {
+      notes(),
+      lock_id() {
     FILETIME file_time;
     GetSystemTimeAsFileTime(&file_time);
     creation_time = file_time;
@@ -157,7 +161,8 @@ MetaData::MetaData(const fs::path &name, bool is_directory)
       link_to(),
       data_map(is_directory ? nullptr : std::make_shared<encrypt::DataMap>()),
       directory_id(is_directory ? std::make_shared<DirectoryId>(RandomString(64)) : nullptr),
-      notes() {
+      notes(),
+      lock_id() {
   attributes.st_gid = getgid();
   attributes.st_uid = getuid();
   attributes.st_mode = 0644;
@@ -186,7 +191,8 @@ MetaData::MetaData(const MetaData& meta_data)
 #endif
     data_map(nullptr),
     directory_id(nullptr),
-    notes(meta_data.notes) {
+    notes(meta_data.notes),
+    lock_id(meta_data.lock_id) {
   if (meta_data.data_map)
     data_map.reset(new encrypt::DataMap(*meta_data.data_map));
   if (meta_data.directory_id)

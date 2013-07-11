@@ -45,6 +45,7 @@ struct FileContext {
   std::shared_ptr<MetaData> meta_data;
   SelfEncryptorPtr self_encryptor;
   bool content_changed;
+  std::string lock_id;
   DirectoryId grandparent_directory_id, parent_directory_id;
 };
 

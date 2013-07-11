@@ -74,6 +74,7 @@ struct MetaData {
   DataMapPtr data_map;
   DirectoryIdPtr directory_id;
   std::vector<std::string> notes;
+  std::string lock_id;
 };
 
 }  // namespace drive

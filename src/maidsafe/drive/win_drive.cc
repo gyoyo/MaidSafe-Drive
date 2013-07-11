@@ -507,6 +507,7 @@ void CbfsDriveInUserSpace::CbFsOpenFile(CallbackFileSystem* sender,
                               *file_context->meta_data.get(),
                               &file_context->grandparent_directory_id,
                               &file_context->parent_directory_id);
+
   }
   catch(...) {
     throw ECBFSError(ERROR_FILE_NOT_FOUND);

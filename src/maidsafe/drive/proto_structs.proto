@@ -39,6 +39,7 @@ message MetaData {
   optional bytes serialised_data_map = 3;
   optional bytes directory_id = 4;
   repeated bytes notes = 5;
+  optional bytes lock_id = 6;
 }
 
 message DirectoryListing {
