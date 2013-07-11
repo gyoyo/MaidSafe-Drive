@@ -54,6 +54,8 @@ typedef std::shared_ptr<DirectoryListing> DirectoryListingPtr;
 typedef std::shared_ptr<DirectoryListingHandler> DirectoryListingHandlerPtr;
 typedef std::unique_ptr<FileContext> FileContextPtr;
 typedef std::unique_ptr<FileContextInfo> FileContextInfoPtr;
+typedef Identity LockId;
+typedef std::shared_ptr<LockId> LockIdPtr;
 
 extern const boost::filesystem::path kMsHidden;
 extern const boost::filesystem::path kEmptyPath;

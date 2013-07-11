@@ -507,7 +507,6 @@ void CbfsDriveInUserSpace::CbFsOpenFile(CallbackFileSystem* sender,
                               *file_context->meta_data.get(),
                               &file_context->grandparent_directory_id,
                               &file_context->parent_directory_id);
-
   }
   catch(...) {
     throw ECBFSError(ERROR_FILE_NOT_FOUND);
@@ -554,6 +553,8 @@ void CbfsDriveInUserSpace::CbFsCloseFile(CallbackFileSystem* sender,
         if (file_context->self_encryptor->Flush()) {
           if (file_context->content_changed) {
             try {
+              if (file_context->meta_data->lock_id)
+                file_context->meta_data->lock_id.reset();
               g_cbfs_drive->UpdateParent(file_context, relative_path.parent_path());
             }
             catch(...) {
@@ -962,7 +963,19 @@ void CbfsDriveInUserSpace::CbFsWriteFile(CallbackFileSystem *sender,
     FileContext* file_context(static_cast<FileContext*>(file_info->get_UserContext()));
     LOG(kInfo) << "CbFsWriteFile- " << relative_path << " writing " << bytes_to_write
                << " bytes at position " << position;
-    BOOST_ASSERT(file_context->self_encryptor);
+    assert(file_context->self_encryptor);
+    if (!file_context->meta_data->lock_id) {
+      file_context->meta_data->lock_id = file_context->lock_id;
+      try {
+        g_cbfs_drive->UpdateParent(file_context, relative_path.parent_path());
+      }
+      catch(...) {
+        throw ECBFSError(ERROR_ERRORS_ENCOUNTERED);
+      }
+    } else {
+      throw ECBFSError(ERROR_LOCK_VIOLATION);
+    }
+
     *bytes_written = 0;
     if (!file_context->self_encryptor) {
       throw ECBFSError(ERROR_INVALID_PARAMETER);

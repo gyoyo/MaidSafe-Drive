@@ -192,9 +192,11 @@ MetaData::MetaData(const MetaData& meta_data)
     data_map(nullptr),
     directory_id(nullptr),
     notes(meta_data.notes),
-    lock_id(meta_data.lock_id) {
+    lock_id() {
   if (meta_data.data_map)
     data_map.reset(new encrypt::DataMap(*meta_data.data_map));
+  if (meta_data.lock_id)
+    lock_id.reset(new LockId(*meta_data.lock_id));
   if (meta_data.directory_id)
     directory_id.reset(new DirectoryId(*meta_data.directory_id));
 }
@@ -247,6 +249,8 @@ void MetaData::Serialise(std::string& serialised_meta_data) const {
     std::string serialised_data_map;
     encrypt::SerialiseDataMap(*data_map, serialised_data_map);
     pb_meta_data.set_serialised_data_map(serialised_data_map);
+    if (lock_id)
+      pb_meta_data.set_lock_id(lock_id->string());
   } else {
     pb_meta_data.set_directory_id(directory_id->string());
   }
@@ -331,6 +335,8 @@ void MetaData::Parse(const std::string& serialised_meta_data) {
       ThrowError(CommonErrors::parsing_error);
     data_map.reset(new encrypt::DataMap);
     encrypt::ParseDataMap(pb_meta_data.serialised_data_map(), *data_map);
+    if (pb_meta_data.has_lock_id())
+      lock_id.reset(new LockId(pb_meta_data.lock_id()));
   } else if (pb_meta_data.has_directory_id()) {
     directory_id.reset(new DirectoryId(pb_meta_data.directory_id()));
   } else {
