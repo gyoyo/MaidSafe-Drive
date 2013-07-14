@@ -48,6 +48,28 @@ struct FileContext {
   DirectoryId grandparent_directory_id, parent_directory_id;
 };
 
+class Session {
+ public:
+  Session(const Identity& unique_user_id,
+          const Identity& root_parent_id,
+          const std::shared_ptr<passport::Maid>& maid);
+
+  Session(const NonEmptyString& serialised_session);
+
+  NonEmptyString Serialise();
+
+  Identity unique_user_id();
+  Identity root_parent_id();
+  std::shared_ptr<passport::Maid> maid();
+
+ private:
+  void Parse(const NonEmptyString& serialised_session);
+
+  Identity unique_user_id_;
+  Identity root_parent_id_;
+  std::shared_ptr<passport::Maid> maid_;
+};
+
 int ForceFlush(DirectoryListingHandlerPtr directory_listing_handler,
                FileContext* file_context);
 

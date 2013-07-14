@@ -13,10 +13,6 @@ implied. See the License for the specific language governing permissions and lim
 License.
 */
 
-#ifdef WIN32
-#  include <conio.h>
-#endif
-
 #include <functional>
 #include <iostream>  // NOLINT
 #include <memory>
@@ -34,8 +30,8 @@ License.
 #include "maidsafe/common/rsa.h"
 #include "maidsafe/common/utils.h"
 
+#include "maidsafe/passport/detail/secure_string.h"
 #include "maidsafe/encrypt/drive_store.h"
-#include "maidsafe/nfs/nfs.h"
 
 #ifdef WIN32
 #  include "maidsafe/drive/win_drive.h"
@@ -46,6 +42,9 @@ License.
 
 namespace fs = boost::filesystem;
 namespace po = boost::program_options;
+typedef maidsafe::passport::detail::Keyword Keyword;
+typedef maidsafe::passport::detail::Pin Pin;
+typedef maidsafe::passport::detail::Password Password;
 
 namespace maidsafe {
 namespace drive {
@@ -58,46 +57,24 @@ typedef FuseDriveInUserSpace DemoDrive;
 
 typedef std::unique_ptr<DemoDrive> DemoDrivePtr;
 
-
-int Mount(const fs::path &mount_dir, const fs::path &chunk_dir) {
+int Mount(const fs::path &mount_dir,
+          const fs::path &chunk_dir,
+          const Keyword& keyword,
+          const Pin& pin,
+          const Password& password) {
   fs::path data_store_path(chunk_dir / "store");
   DiskUsage disk_usage(1048576000);
-  MemoryUsage memory_usage(0);
   maidsafe::drive_store::DriveStore data_store(data_store_path, disk_usage);
-  maidsafe::passport::Maid::signer_type maid_signer;
-  maidsafe::passport::Maid maid(maid_signer);
-  routing::Routing routing(maid);
-  nfs::ClientMaidNfs client_nfs(routing, maid);
 
   boost::system::error_code error_code;
   if (!fs::exists(chunk_dir, error_code))
     return error_code.value();
 
-  std::string root_parent_id;
-  fs::path id_path(data_store_path / "root_parent_id");
-  bool first_run(!fs::exists(id_path, error_code));
-  if (!first_run)
-    BOOST_VERIFY(ReadFile(id_path, &root_parent_id) && !root_parent_id.empty());
-
-  // The following values are passed in and returned on unmount.
-  int64_t max_space(std::numeric_limits<int64_t>::max()), used_space(0);
-  Identity unique_user_id(Identity(std::string(64, 'a')));
-  DemoDrivePtr drive_in_user_space(new DemoDrive(client_nfs,
-                                                 data_store,
-                                                 maid,
-                                                 unique_user_id,
-                                                 root_parent_id,
-                                                 mount_dir,
-                                                 "MaidSafeDrive",
-                                                 max_space,
-                                                 used_space));
-  if (first_run)
-    BOOST_VERIFY(WriteFile(id_path, drive_in_user_space->root_parent_id()));
+  DemoDrivePtr drive(new DemoDrive(data_store, mount_dir, keyword, pin, password));
 
 #ifdef WIN32
-  drive_in_user_space->WaitUntilUnMounted();
-  // while (!kbhit());
-  drive_in_user_space->Unmount(max_space, used_space);
+  drive->WaitUntilUnMounted();
+  drive->Unmount();
 #endif
 
   return 0;
@@ -143,6 +120,24 @@ fs::path GetPathFromProgramOption(const std::string &option_name,
   }
 }
 
+std::string GetUserInputFromProgramOption(const std::string &option_name,
+                                          po::variables_map *variables_map,
+                                          bool must_exist) {
+  if (variables_map->count(option_name)) {
+    std::string option(variables_map->at(option_name).as<std::string>());
+    if (must_exist) {
+      if (option.empty()) {
+        LOG(kError) << "Invalid " << option_name << " option.  " << option << " empty.";
+        return std::string();
+      }
+    }
+    // LOG(kInfo) << option_name << " set to " << option;
+    return option;
+  } else {
+    LOG(kWarning) << "You must set the " << option_name << " option to a non-empty string.";
+    return std::string();
+  }
+}
 
 int main(int argc, char *argv[]) {
   maidsafe::log::Logging::Instance().Initialise(argc, argv);
@@ -171,6 +166,9 @@ int main(int argc, char *argv[]) {
         ("help,H", "print this help message")
         ("chunkdir,C", po::value<std::string>(), "set directory to store chunks")
         ("mountdir,D", po::value<std::string>(), "set virtual drive name")
+        ("password,P", po::value<std::string>(), "password")
+        ("keyword,K", po::value<std::string>(), "keyword")
+        ("pin,I", po::value<std::string>(), "pin")
         ("checkdata", "check all data (metadata and chunks)")
         ("start", "start MaidSafeDrive (mount drive) [default]")
         ("stop", "stop MaidSafeDrive (unmount drive) [not implemented]"); // dunno if we can from here!
@@ -218,6 +216,10 @@ int main(int argc, char *argv[]) {
     fs::path mount_path(GetPathFromProgramOption("mountdir", &variables_map, true));
 #endif
 
+    Keyword keyword(GetUserInputFromProgramOption("keyword", &variables_map, true));
+    Pin pin(GetUserInputFromProgramOption("pin", &variables_map, true));
+    Password password(GetUserInputFromProgramOption("password", &variables_map, true));
+
     if (variables_map.count("stop")) {
       LOG(kInfo) << "Trying to stop.";
       return 0;
@@ -228,7 +230,12 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    int result(maidsafe::drive::Mount(mount_path, chunkstore_path));
+    if (keyword.string().empty() || pin.string().empty() || password.string().empty()) {
+      LOG(kWarning) << options_description;
+      return 1;
+    }
+
+    int result(maidsafe::drive::Mount(mount_path, chunkstore_path, keyword, pin, password));
     return result;
   }
   catch(const std::exception& e) {

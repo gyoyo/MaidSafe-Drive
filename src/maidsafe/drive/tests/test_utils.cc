@@ -25,42 +25,24 @@ License.
 #include "maidsafe/drive/return_codes.h"
 
 namespace maidsafe {
-
 namespace drive {
-
 namespace test {
 
-std::shared_ptr<DerivedDriveInUserSpace> MakeAndMountDrive(
-    const Identity& unique_user_id,
-    const std::string& root_parent_id,
-    routing::Routing& routing,
-    const passport::Maid& maid,
+std::shared_ptr<DerivedDrive> MakeAndMountDrive(
     const maidsafe::test::TestPath& main_test_dir,
-    const int64_t &max_space,
-    const int64_t &used_space,
-    std::shared_ptr<nfs::ClientMaidNfs>& client_nfs,
-    /*std::shared_ptr<data_store::DataStore<data_store::DataBuffer>>& data_store,*/
-    std::shared_ptr<data_store::PermanentStore>& data_store,
-    fs::path& mount_directory) {
-  // typedef data_store::DataStore<data_store::DataBuffer> DataStore;
-  typedef data_store::PermanentStore DataStore;
-  client_nfs.reset(new nfs::ClientMaidNfs(routing, maid));
-  /*data_store.reset(new DataStore(MemoryUsage(0),
-                                 DiskUsage(1073741824),
-                                 DataStore::PopFunctor(),
-                                 *main_test_dir / "local"));*/
+    std::shared_ptr<DataStore>& data_store,
+    fs::path& mount_directory,
+    const passport::detail::Keyword& keyword,
+    const passport::detail::Pin& pin,
+    const passport::detail::Password& password) {
   data_store.reset(new DataStore(*main_test_dir / "local", DiskUsage(1073741824)));
 
-  std::shared_ptr<DerivedDriveInUserSpace> drive(
-      std::make_shared<DerivedDriveInUserSpace>(*client_nfs,
-                                                *data_store,
-                                                maid,
-                                                unique_user_id,
-                                                root_parent_id,
-                                                "S:",
-                                                "MaidSafeDrive",
-                                                max_space,
-                                                used_space));
+  std::shared_ptr<DerivedDrive> drive(
+      std::make_shared<DerivedDrive>(*data_store,
+                                     mount_directory,
+                                     keyword,
+                                     pin,
+                                     password));
 
 #ifdef WIN32
   fs::path mount_dir("S:");
@@ -78,16 +60,14 @@ std::shared_ptr<DerivedDriveInUserSpace> MakeAndMountDrive(
   }
 #endif
 
-#ifdef WIN32
-  mount_dir /= "\\Owner";
-#else
+#ifndef WIN32
   // TODO(Team): Find out why, if the mount is put on the asio service,
   //             unmount hangs
-  boost::thread th(std::bind(&DerivedDriveInUserSpace::Mount, drive));
+  boost::thread th(std::bind(&DerivedDrive::Mount, drive));
   if (!drive->WaitUntilMounted()) {
     LOG(kError) << "Drive failed to mount";
 //     asio_service.Stop();
-    return std::shared_ptr<DerivedDriveInUserSpace>();
+    return std::shared_ptr<DerivedDrive>();
   }
 #endif
 
@@ -96,13 +76,12 @@ std::shared_ptr<DerivedDriveInUserSpace> MakeAndMountDrive(
   return drive;
 }
 
-void UnmountDrive(std::shared_ptr<DerivedDriveInUserSpace> drive,
+void UnmountDrive(std::shared_ptr<DerivedDrive> drive,
                   AsioService& asio_service) {
-  int64_t max_space(0), used_space(0);
 #ifdef WIN32
-  EXPECT_TRUE(drive->Unmount(max_space, used_space));
+  EXPECT_TRUE(drive->Unmount());
 #else
-  drive->Unmount(max_space, used_space);
+  drive->Unmount();
   drive->WaitUntilUnMounted();
 #endif
   asio_service.Stop();
@@ -321,9 +300,10 @@ int64_t CalculateUsedSpace(fs::path const& path) {
   fs::recursive_directory_iterator begin(path), end;
   try {
     for (; begin != end; ++begin) {
-      if (fs::is_directory(*begin)) {
-        space_used += 4096;  // kDirectorySize;
-      } else if (fs::is_regular_file(*begin)) {
+      //if (fs::is_directory(*begin)) {
+      //  space_used += 4096;  // kDirectorySize;
+      //} else 
+      if (fs::is_regular_file(*begin)) {
         space_used += fs::file_size((*begin).path(), error_code);
         EXPECT_EQ(0, error_code.value());
       }
@@ -344,7 +324,5 @@ uint64_t TotalSize(encrypt::DataMapPtr data_map) {
 }
 
 }  // namespace test
-
 }  // namespace drive
-
 }  // namespace maidsafe

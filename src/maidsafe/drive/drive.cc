@@ -36,26 +36,18 @@ namespace fs = boost::filesystem;
 namespace maidsafe {
 namespace drive {
 
-DriveInUserSpace::DriveInUserSpace(ClientNfs& client_nfs,
-                                   DataStore& data_store,
-                                   const Maid& maid,
-                                   const Identity& unique_user_id,
-                                   const std::string& root_parent_id,
+DriveInUserSpace::DriveInUserSpace(DataStore& data_store,
                                    const fs::path& mount_dir,
-                                   const int64_t& max_space,
-                                   const int64_t& used_space)
+                                   const Keyword& keyword,
+                                   const Pin& pin,
+                                   const Password& password)
     : drive_stage_(kUnInitialised),
-      client_nfs_(client_nfs),
       data_store_(data_store),
-      maid_(maid),
-      directory_listing_handler_(new DirectoryListingHandler(client_nfs,
-                                                             data_store,
-                                                             maid,
-                                                             unique_user_id,
-                                                             root_parent_id)),
+      directory_listing_handler_(new DirectoryListingHandler(data_store,
+                                                             keyword,
+                                                             pin,
+                                                             password)),
       mount_dir_(mount_dir),
-      max_space_(max_space),
-      used_space_(used_space),
       drive_changed_signal_(),
       unmount_mutex_(),
       api_mutex_(),
@@ -75,9 +67,12 @@ std::string DriveInUserSpace::root_parent_id() const {
   return directory_listing_handler_->root_parent_id().string();
 }
 
-int64_t DriveInUserSpace::GetUsedSpace() const {
-  std::lock_guard<std::mutex> guard(api_mutex_);
-  return used_space_;
+int64_t DriveInUserSpace::MaxSpace() const {
+  return data_store_.MaxDiskUsage().data;
+}
+
+int64_t DriveInUserSpace::UsedSpace() const {
+  return data_store_.CurrentDiskUsage().data;
 }
 
 void DriveInUserSpace::SetMountState(bool mounted) {
@@ -107,14 +102,13 @@ void DriveInUserSpace::GetMetaData(const fs::path& relative_path,
                                    MetaData& meta_data,
                                    DirectoryId* grandparent_directory_id,
                                    DirectoryId* parent_directory_id) {
-  typedef DirectoryListingHandler::DirectoryType DirectoryType;
-  DirectoryType parent(directory_listing_handler_->GetFromPath(relative_path.parent_path()));
-  parent.first.listing->GetChild(relative_path.filename(), meta_data);
+  DirectoryData parent(directory_listing_handler_->GetFromPath(relative_path.parent_path()));
+  parent.listing->GetChild(relative_path.filename(), meta_data);
 
   if (grandparent_directory_id)
-    *grandparent_directory_id = parent.first.parent_id;
+    *grandparent_directory_id = parent.parent_id;
   if (parent_directory_id)
-    *parent_directory_id = parent.first.listing->directory_id();
+    *parent_directory_id = parent.listing->directory_id();
   return;
 }
 
@@ -133,16 +127,12 @@ void DriveInUserSpace::AddFile(const fs::path& relative_path,
                                          parent_directory_id);
 }
 
-bool DriveInUserSpace::CanRemove(const fs::path& relative_path) {
-  return directory_listing_handler_->CanDelete(relative_path);
-}
-
 void DriveInUserSpace::RemoveFile(const fs::path& relative_path) {
   MetaData meta_data;
   directory_listing_handler_->DeleteElement(relative_path, meta_data);
 
   if (meta_data.data_map && !meta_data.directory_id) {
-    encrypt::SelfEncryptor delete_this(meta_data.data_map, client_nfs_, data_store_);
+    encrypt::SelfEncryptor delete_this(meta_data.data_map, data_store_);
     delete_this.DeleteAllChunks();
   }
   return;
@@ -162,7 +152,7 @@ void DriveInUserSpace::RenameFile(const fs::path& old_relative_path,
 bool DriveInUserSpace::TruncateFile(FileContext* file_context, const uint64_t& size) {
   if (!file_context->self_encryptor) {
     file_context->self_encryptor.reset(
-        new encrypt::SelfEncryptor(file_context->meta_data->data_map, client_nfs_, data_store_));
+        new encrypt::SelfEncryptor(file_context->meta_data->data_map, data_store_));
   }
   bool result = file_context->self_encryptor->Truncate(size);
   if (result) {
@@ -243,7 +233,6 @@ void DriveInUserSpace::ReadHiddenFile(const fs::path& relative_path, std::string
   BOOST_ASSERT(!file_context.meta_data->directory_id);
 
   file_context.self_encryptor.reset(new encrypt::SelfEncryptor(file_context.meta_data->data_map,
-                                                               client_nfs_,
                                                                data_store_));
   if (file_context.self_encryptor->size() > std::numeric_limits<uint32_t>::max())
     ThrowError(CommonErrors::invalid_parameter);
@@ -288,7 +277,6 @@ void DriveInUserSpace::WriteHiddenFile(const fs::path &relative_path,
 
   // Write the data
   file_context.self_encryptor.reset(new encrypt::SelfEncryptor(file_context.meta_data->data_map,
-                                                               client_nfs_,
                                                                data_store_));
 
   if (file_context.self_encryptor->size() > content.size())
@@ -313,9 +301,8 @@ void DriveInUserSpace::DeleteHiddenFile(const fs::path &relative_path) {
 
 void DriveInUserSpace::SearchHiddenFiles(const fs::path &relative_path,
                                          std::vector<std::string> *results) {
-  typedef DirectoryListingHandler::DirectoryType DirectoryType;
-  DirectoryType directory(directory_listing_handler_->GetFromPath(relative_path));
-  directory.first.listing->GetHiddenChildNames(results);
+  DirectoryData directory(directory_listing_handler_->GetFromPath(relative_path));
+  directory.listing->GetHiddenChildNames(results);
   return;
 }
 

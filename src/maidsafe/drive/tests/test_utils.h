@@ -25,10 +25,7 @@ License.
 #include "maidsafe/common/rsa.h"
 #include "maidsafe/common/test.h"
 #include "maidsafe/common/utils.h"
-
-// #include "maidsafe/data_store/data_store.h"
-#include "maidsafe/data_store/permanent_store.h"
-#include "maidsafe/nfs/nfs.h"
+#include "maidsafe/common/asio_service.h"
 
 #include "maidsafe/encrypt/data_map.h"
 #include "maidsafe/encrypt/self_encryptor.h"
@@ -52,12 +49,12 @@ namespace drive {
 
 #ifdef WIN32
 #  ifdef HAVE_CBFS
-typedef CbfsDriveInUserSpace TestDriveInUserSpace;
+typedef CbfsDriveInUserSpace TestDrive;
 #  else
-typedef DummyWinDriveInUserSpace TestDriveInUserSpace;
+typedef DummyWinDriveInUserSpace TestDrive;
 #  endif
 #else
-typedef FuseDriveInUserSpace TestDriveInUserSpace;
+typedef FuseDriveInUserSpace TestDrive;
 #endif
 
 namespace test {
@@ -68,50 +65,28 @@ enum TestOperationCode {
   kCompare = 2
 };
 
-class DerivedDriveInUserSpace : public TestDriveInUserSpace {
+class DerivedDrive : public TestDrive {
  public:
-  // typedef data_store::DataStore<data_store::DataBuffer> DataStore;
-  typedef data_store::PermanentStore DataStore;
+  typedef maidsafe::drive_store::DriveStore DataStore;
 
-  DerivedDriveInUserSpace(nfs::ClientMaidNfs& client_nfs,
-                          DataStore& data_store,
-                          const passport::Maid& default_maid,
-                          const Identity& unique_user_id,
-                          const std::string& root_parent_id,
-                          const boost::filesystem::path &mount_dir,
-                          const boost::filesystem::path &drive_name,
-                          const int64_t& max_space,
-                          const int64_t& used_space)
-      : TestDriveInUserSpace(client_nfs,
-                             data_store,
-                             default_maid,
-                             unique_user_id,
-                             root_parent_id,
-                             mount_dir,
-                             drive_name,
-                             max_space,
-                             used_space) {}
+  DerivedDrive(DataStore& data_store,
+               const boost::filesystem::path &mount_dir,
+               const Keyword& keyword,
+               const Pin& pin,
+               const Password& password)
+      : TestDrive(data_store, mount_dir, keyword, pin, password) {}
 
   std::shared_ptr<DirectoryListingHandler> directory_listing_handler() const {
     return directory_listing_handler_;
   }
 };
 
-std::shared_ptr<DerivedDriveInUserSpace> MakeAndMountDrive(
-    const std::string &unique_user_id,
-    const std::string &root_parent_id,
-    routing::Routing& routing,
-    const passport::Maid& maid,
+std::shared_ptr<DerivedDrive> MakeAndMountDrive(
     const maidsafe::test::TestPath& main_test_dir,
-    const int64_t &max_space,
-    const int64_t &used_space,
-    std::shared_ptr<nfs::ClientMaidNfs>& client_nfs,
-    /*std::shared_ptr<data_store::DataStore<data_store::DataBuffer>>& data_store,*/
-    std::shared_ptr<data_store::PermanentStore>& data_store,
+    std::shared_ptr<DataStore>& data_store,
     fs::path& mount_directory);
 
-void UnmountDrive(std::shared_ptr<DerivedDriveInUserSpace> drive,
-                  AsioService& asio_service);
+void UnmountDrive(std::shared_ptr<DerivedDrive> drive, AsioService& asio_service);
 
 void PrintResult(const bptime::ptime &start_time,
                  const bptime::ptime &stop_time,

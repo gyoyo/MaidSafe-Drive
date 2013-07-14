@@ -34,22 +34,16 @@ namespace drive {
 
 class CbfsDriveInUserSpace : public DriveInUserSpace {
  public:
-  typedef nfs::ClientMaidNfs ClientNfs;
-  typedef passport::Maid Maid;
 
-  CbfsDriveInUserSpace(ClientNfs& client_nfs,
-                       DataStore& data_store,
-                       const Maid& maid,
-                       const Identity& unique_user_id,
-                       const std::string& root_parent_id,
-                       const boost::filesystem::path &mount_dir,
-                       const boost::filesystem::path &drive_name,
-                       const int64_t &max_space,
-                       const int64_t &used_space);
+  CbfsDriveInUserSpace(DataStore& data_store,
+                       const fs::path &mount_dir,
+                       const Keyword& keyword,
+                       const Pin& pin,
+                       const Password& password);
   virtual ~CbfsDriveInUserSpace();
   bool Init();
   bool Mount();
-  virtual bool Unmount(int64_t &max_space, int64_t &used_space);
+  virtual bool Unmount();
   int Install();
   void NotifyDirectoryChange(const boost::filesystem::path &relative_path, OpType op) const;
   uint32_t max_file_path_length();

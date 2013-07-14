@@ -26,14 +26,7 @@ License.
 #include "maidsafe/common/rsa.h"
 #include "maidsafe/common/utils.h"
 
-#ifdef MAIDSAFE_DRIVE_DEMO
-# include "maidsafe/encrypt/drive_store.h"
-  typedef maidsafe::drive_store::DriveStore DataStore;
-#else
-# include "maidsafe/data_store/permanent_store.h"
-  typedef maidsafe::data_store::PermanentStore DataStore;
-#endif
-#include "maidsafe/nfs/nfs.h"
+#include "maidsafe/encrypt/drive_store.h"
 
 #include "maidsafe/drive/config.h"
 #include "maidsafe/drive/drive_api.h"
@@ -49,6 +42,7 @@ namespace drive {
 
 namespace test { class DirectoryListingHandlerTest; }
 
+typedef maidsafe::drive_store::DriveStore DataStore;
 const size_t kMaxAttempts = 3;
 
 struct DirectoryData {
@@ -72,29 +66,23 @@ struct DirectoryData {
 
 class DirectoryListingHandler {
  public:
-  typedef nfs::ClientMaidNfs ClientNfs;
   typedef passport::Maid Maid;
-  typedef std::pair<DirectoryData, uint32_t> DirectoryType;
-  typedef OwnerDirectory::name_type OwnerDirectoryNameType;
-  typedef GroupDirectory::name_type GroupDirectoryNameType;
-  typedef WorldDirectory::name_type WorldDirectoryNameType;
-  typedef OwnerDirectory::serialised_type OwnerDirectorySerialisedType;
-  typedef GroupDirectory::serialised_type GroupDirectorySerialisedType;
-  typedef WorldDirectory::serialised_type WorldDirectorySerialisedType;
+  typedef passport::detail::Keyword Keyword;
+  typedef passport::detail::Pin Pin;
+  typedef passport::detail::Password Password;
 
   enum { kOwnerValue, kGroupValue, kWorldValue, kInvalidValue };
 
-  DirectoryListingHandler(ClientNfs& client_nfs,
-                          DataStore& data_store,
-                          const Maid& maid,
-                          const Identity& unique_user_id,
-                          std::string root_parent_id);
+  DirectoryListingHandler(DataStore& data_store,
+                          const Keyword& keyword,
+                          const Pin& pin,
+                          const Password& password);
   // Virtual destructor to allow inheritance in testing.
   virtual ~DirectoryListingHandler();
 
   Identity unique_user_id() const { return unique_user_id_; }
   Identity root_parent_id() const { return root_parent_id_; }
-  DirectoryType GetFromPath(const fs::path& relative_path);
+  DirectoryData GetFromPath(const fs::path& relative_path);
   // Adds a directory or file represented by meta_data and relative_path to the appropriate parent
   // directory listing.  If the element is a directory, a new directory listing is created and
   // stored.  The parent directory's ID is returned in parent_id and its parent directory's ID is
@@ -109,17 +97,12 @@ class DirectoryListingHandler {
   // allows the caller to delete any corresponding chunks.  If save_changes is true, the parent
   // directory listing is stored after the deletion.
   void DeleteElement(const fs::path& relative_path, MetaData& meta_data);
-  bool CanDelete(const fs::path& relative_path);
   void RenameElement(const fs::path& old_relative_path,
                      const fs::path& new_relative_path,
                      MetaData& meta_data,
                      int64_t& reclaimed_space);
   void UpdateParentDirectoryListing(const fs::path& parent_path, MetaData meta_data);
 
-  void SetWorldReadWrite();
-  void SetWorldReadOnly();
-
-  ClientNfs& client_nfs() const { return client_nfs_; }
   DataStore& data_store() const { return data_store_; }
 
   friend class test::DirectoryListingHandlerTest;
@@ -128,26 +111,19 @@ class DirectoryListingHandler {
   DirectoryListingHandler(const DirectoryListingHandler&);
   DirectoryListingHandler& operator=(const DirectoryListingHandler&);
   DirectoryData RetrieveFromStorage(const DirectoryId& parent_id,
-                                    const DirectoryId& directory_id,
-                                    int directory_type) const;
-  void PutToStorage(const DirectoryType& directory);
-  void DeleteStored(const DirectoryId& parent_id,
-                    const DirectoryId& directory_id,
-                    int directory_type);
+                                    const DirectoryId& directory_id) const;
+  void PutToStorage(const DirectoryData& directory);
+  void DeleteStored(const DirectoryId& parent_id, const DirectoryId& directory_id);
   void RetrieveDataMap(const DirectoryId& parent_id,
                        const DirectoryId& directory_id,
-                       int directory_type,
                        DataMapPtr data_map) const;
   bool IsDirectory(const MetaData& meta_data) const;
   void GetParentAndGrandparent(const fs::path& relative_path,
-                               DirectoryType* grandparent,
-                               DirectoryType* parent,
+                               DirectoryData* grandparent,
+                               DirectoryData* parent,
                                MetaData* parent_meta_data);
   bool RenameTargetCanBeRemoved(const fs::path& new_relative_path,
                                 const MetaData& target_meta_data);
-  int GetDirectoryType(const fs::path& relative_path);
-  bool CanAdd(const fs::path& relative_path);
-  bool CanRename(const fs::path& from_path, const fs::path& to_path);
   void RenameSameParent(const fs::path& old_relative_path,
                         const fs::path& new_relative_path,
                         MetaData& meta_data,
@@ -156,15 +132,11 @@ class DirectoryListingHandler {
                              const fs::path& new_relative_path,
                              MetaData& meta_data,
                              int64_t& reclaimed_space);
-  void ReStoreDirectories(const fs::path& relative_path, int directory_type);
-
  private:
-  ClientNfs& client_nfs_;
   DataStore& data_store_;
-  const Maid kMaid_;
+  std::shared_ptr<Maid> maid_;
   Identity unique_user_id_, root_parent_id_;
   fs::path relative_root_;
-  bool world_is_writeable_;
 };
 
 }  // namespace drive

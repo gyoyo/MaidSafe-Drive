@@ -29,14 +29,8 @@ License.
 #include "boost/thread/mutex.hpp"
 
 #include "maidsafe/common/rsa.h"
-#ifdef MAIDSAFE_DRIVE_DEMO
- #include "maidsafe/encrypt/drive_store.h"
- typedef maidsafe::drive_store::DriveStore DataStore;
-#else
- #include "maidsafe/data_store/permanent_store.h"
- typedef maidsafe::data_store::PermanentStore DataStore;
-#endif
-#include "maidsafe/nfs/nfs.h"
+#include "maidsafe/encrypt/drive_store.h"
+
 #include "maidsafe/drive/config.h"
 
 namespace fs = boost::filesystem;
@@ -55,32 +49,27 @@ class DirectoryListingHandler;
 // path, new absolute path for Rename only, and operation type.
 typedef bs2::signal<void(fs::path, fs::path, OpType)> DriveChangedSignal;
 typedef std::shared_ptr<std::function<DriveChangedSignal::signature_type> > DriveChangedSlotPtr;
+typedef maidsafe::drive_store::DriveStore DataStore;
 
 class DriveInUserSpace {
   typedef bs2::signal<void(const fs::path&, OpType op)> NotifyDirectoryChangeSignal;
 
  public:
-  typedef nfs::ClientMaidNfs ClientNfs;
   typedef passport::Maid Maid;
+  typedef passport::detail::Keyword Keyword;
+  typedef passport::detail::Pin Pin;
+  typedef passport::detail::Password Password;
 
-  // client_nfs: Enables network file operations.
   // data_store: An alternative to client_nfs for local testing.
   // maid: Client identity to validate network operations.
-  // unique_user_id: A random id created during user creation in client.
-  // root_parent_id: A random id representing non-existing root parent directory.
   // mount_dir: Identifies the root path at which the drive is mounted.
-  // max_space: Space available for data storage.
-  // used_space: Space taken on network storing data.
-  DriveInUserSpace(ClientNfs& client_nfs,
-                   DataStore& data_store,
-                   const Maid& maid,
-                   const Identity& unique_user_id,
-                   const std::string& root_parent_id,
+  DriveInUserSpace(DataStore& data_store,
                    const fs::path& mount_dir,
-                   const int64_t& max_space,
-                   const int64_t& used_space);
+                   const Keyword& keyword,
+                   const Pin& pin,
+                   const Password& password);
   virtual ~DriveInUserSpace();
-  virtual bool Unmount(int64_t &max_space, int64_t &used_space) = 0;
+  virtual bool Unmount() = 0;
 #ifdef MAIDSAFE_APPLE
   fs::path GetMountDir() { return mount_dir_; }
 #endif
@@ -88,8 +77,10 @@ class DriveInUserSpace {
   std::string unique_user_id() const;
   // Returns root parent id.
   std::string root_parent_id() const;
-  // Returns network/drive used space.
-  int64_t GetUsedSpace() const;
+  // Returns max available space.
+  int64_t MaxSpace() const;
+  // Returns used space.
+  int64_t UsedSpace() const;
   // Sets the mount state of drive.
   void SetMountState(bool mounted);
   // Blocks until drive is in the mounted state. Times out if state does not change in expected
@@ -125,8 +116,6 @@ class DriveInUserSpace {
                const MetaData& meta_data,
                DirectoryId* grandparent_directory_id,
                DirectoryId* parent_directory_id);
-  // Determines whether the file located at 'relative_path' can be removed.
-  bool CanRemove(const fs::path& relative_path);
   // Deletes the file at 'relative_path' from the appropriate parent directory listing as well as
   // the listing associated with that path if it represents a directory.
   void RemoveFile(const fs::path& relative_path);
@@ -173,12 +162,9 @@ class DriveInUserSpace {
                             const fs::path& to_relative_path) const = 0;
 
   enum DriveStage { kUnInitialised, kInitialised, kMounted, kUnMounted, kCleaned } drive_stage_;
-  ClientNfs& client_nfs_;
   DataStore& data_store_;
-  const Maid maid_;
   std::shared_ptr<DirectoryListingHandler> directory_listing_handler_;
   fs::path mount_dir_;
-  int64_t max_space_, used_space_;
   DriveChangedSignal drive_changed_signal_;
   boost::mutex unmount_mutex_;
 #ifdef MAIDSAFE_WIN32

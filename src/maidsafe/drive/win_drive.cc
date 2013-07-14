@@ -60,12 +60,12 @@ CbfsDriveInUserSpace *g_cbfs_drive;
 LPCSTR registration_key(BOOST_PP_STRINGIZE(CBFS_KEY));
 
 struct DirectoryEnumerationContext {
-  explicit DirectoryEnumerationContext(const std::pair<DirectoryData, uint32_t>& directory_in)
+  explicit DirectoryEnumerationContext(const DirectoryData& directory_in)
       : exact_match(false),
         directory(directory_in) {}
   DirectoryEnumerationContext() : exact_match(false), directory() {}
   bool exact_match;
-  std::pair<DirectoryData, uint32_t> directory;
+  DirectoryData directory;
 };
 
 
@@ -92,27 +92,16 @@ void ErrorMessage(const std::string &method_name, ECBFSError error) {
 
 }  // unnamed namespace
 
-CbfsDriveInUserSpace::CbfsDriveInUserSpace(ClientNfs& client_nfs,
-                                           DataStore& data_store,
-                                           const Maid& maid,
-                                           const Identity& unique_user_id,
-                                           const std::string& root_parent_id,
+CbfsDriveInUserSpace::CbfsDriveInUserSpace(DataStore& data_store,
                                            const fs::path &mount_dir,
-                                           const fs::path &drive_name,
-                                           const int64_t &max_space,
-                                           const int64_t &used_space)
-    : DriveInUserSpace(client_nfs,
-                       data_store,
-                       maid,
-                       unique_user_id,
-                       root_parent_id,
-                       mount_dir,
-                       max_space,
-                       used_space),
+                                           const Keyword& keyword,
+                                           const Pin& pin,
+                                           const Password& password)
+    : DriveInUserSpace(data_store, mount_dir, keyword, pin, password),
       callback_filesystem_(),
       guid_("713CC6CE-B3E2-4fd9-838D-E28F558F6866"),
       icon_id_(L"SigmoidCoreDriveIcon"),
-      drive_name_(drive_name.wstring()) {
+      drive_name_(L"MaidSafeDrive") {
   g_cbfs_drive = this;
   if (!Init()) {
     LOG(kError) << "Failed to initialise drive.";
@@ -125,7 +114,7 @@ CbfsDriveInUserSpace::CbfsDriveInUserSpace(ClientNfs& client_nfs,
 }
 
 CbfsDriveInUserSpace::~CbfsDriveInUserSpace() {
-  Unmount(max_space_, used_space_);
+  Unmount();
 }
 
 bool CbfsDriveInUserSpace::Init() {
@@ -200,7 +189,7 @@ void CbfsDriveInUserSpace::UnmountDrive(const bptime::time_duration &timeout_bef
   }
 }
 
-bool CbfsDriveInUserSpace::Unmount(int64_t &max_space, int64_t &used_space) {
+bool CbfsDriveInUserSpace::Unmount() {
   if (drive_stage_ != kCleaned) {
     if (callback_filesystem_.Active())
       UnmountDrive(bptime::seconds(3));
@@ -215,8 +204,6 @@ bool CbfsDriveInUserSpace::Unmount(int64_t &max_space, int64_t &used_space) {
     }
     drive_stage_ = kCleaned;
   }
-  max_space = max_space_;
-  used_space = used_space_;
   return true;
 }
 
@@ -413,13 +400,12 @@ void CbfsDriveInUserSpace::CbFsGetVolumeSize(CallbackFileSystem *sender,
   LOG(kInfo) << "CbFsGetVolumeSize";
 
   WORD sector_size(sender->GetSectorSize());
-  *total_number_of_sectors = g_cbfs_drive->max_space_ / sector_size;
-  *number_of_free_sectors = (g_cbfs_drive->max_space_ - g_cbfs_drive->used_space_) / sector_size;
+  *total_number_of_sectors = g_cbfs_drive->MaxSpace() / sector_size;
+  *number_of_free_sectors = (g_cbfs_drive->MaxSpace() - g_cbfs_drive->UsedSpace()) / sector_size;
 }
 
 
-void CbfsDriveInUserSpace::CbFsGetVolumeLabel(CallbackFileSystem *sender,
-                                              LPTSTR volume_label) {
+void CbfsDriveInUserSpace::CbFsGetVolumeLabel(CallbackFileSystem *sender, LPTSTR volume_label) {
   LOG(kInfo) << "CbFsGetVolumeLabel";
   wcsncpy_s(volume_label, g_cbfs_drive->drive_name().size() + 1,
             &g_cbfs_drive->drive_name().at(0),
@@ -427,15 +413,13 @@ void CbfsDriveInUserSpace::CbFsGetVolumeLabel(CallbackFileSystem *sender,
   UNREFERENCED_PARAMETER(sender);
 }
 
-void CbfsDriveInUserSpace::CbFsSetVolumeLabel(CallbackFileSystem *sender,
-                                              LPCTSTR volume_label) {
+void CbfsDriveInUserSpace::CbFsSetVolumeLabel(CallbackFileSystem *sender, LPCTSTR volume_label) {
   LOG(kInfo) << "CbFsSetVolumeLabel";
   UNREFERENCED_PARAMETER(sender);
   UNREFERENCED_PARAMETER(volume_label);
 }
 
-void CbfsDriveInUserSpace::CbFsGetVolumeId(CallbackFileSystem *sender,
-                                           PDWORD volume_id) {
+void CbfsDriveInUserSpace::CbFsGetVolumeId(CallbackFileSystem *sender, PDWORD volume_id) {
   LOG(kInfo) << "CbFsGetVolumeId";
   *volume_id = 0x68451321;
   UNREFERENCED_PARAMETER(sender);
@@ -465,16 +449,12 @@ void CbfsDriveInUserSpace::CbFsCreateFile(CallbackFileSystem *sender,
     throw ECBFSError(ERROR_ACCESS_DENIED);
   }
 
-  if (is_directory) {
-    g_cbfs_drive->used_space_ += kDirectorySize;
-  } else {
+  if (!is_directory) {
     encrypt::DataMapPtr data_map(new encrypt::DataMap());
     *data_map = *file_context->meta_data->data_map;
     file_context->meta_data->data_map = data_map;
     file_context->self_encryptor.reset(
-        new encrypt::SelfEncryptor(file_context->meta_data->data_map,
-                                   g_cbfs_drive->client_nfs_,
-                                   g_cbfs_drive->data_store_));
+        new encrypt::SelfEncryptor(file_context->meta_data->data_map, g_cbfs_drive->data_store_));
   }
 
   g_cbfs_drive->drive_changed_signal_(g_cbfs_drive->mount_dir_ / relative_path,
@@ -522,9 +502,7 @@ void CbfsDriveInUserSpace::CbFsOpenFile(CallbackFileSystem* sender,
       *data_map = *file_context->meta_data->data_map;
       file_context->meta_data->data_map = data_map;
       file_context->self_encryptor.reset(
-          new encrypt::SelfEncryptor(file_context->meta_data->data_map,
-                                     g_cbfs_drive->client_nfs_,
-                                     g_cbfs_drive->data_store_));
+          new encrypt::SelfEncryptor(file_context->meta_data->data_map, g_cbfs_drive->data_store_));
     }
   }
   file_info->set_UserContext(file_context);
@@ -666,7 +644,7 @@ void CbfsDriveInUserSpace::CbFsEnumerateDirectory(
     directory_enumeration_info->set_UserContext(nullptr);
   }
 
-  std::pair<DirectoryData, uint32_t> directory;
+  DirectoryData directory;
   if (directory_enumeration_info->get_UserContext() == nullptr) {
     try {
       directory = g_cbfs_drive->directory_listing_handler_->GetFromPath(relative_path);
@@ -676,24 +654,24 @@ void CbfsDriveInUserSpace::CbFsEnumerateDirectory(
     }
     enum_context = new DirectoryEnumerationContext(directory);
     BOOST_ASSERT(enum_context);
-    enum_context->directory.first.listing->ResetChildrenIterator();
+    enum_context->directory.listing->ResetChildrenIterator();
     directory_enumeration_info->set_UserContext(enum_context);
   } else {
     enum_context =
       static_cast<DirectoryEnumerationContext*>(directory_enumeration_info->get_UserContext());
     if (restart)
-      enum_context->directory.first.listing->ResetChildrenIterator();
+      enum_context->directory.listing->ResetChildrenIterator();
   }
 
   MetaData meta_data;
   if (exact_match) {
     while (!(*file_found)) {
-      if (!enum_context->directory.first.listing->GetChildAndIncrementItr(meta_data))
+      if (!enum_context->directory.listing->GetChildAndIncrementItr(meta_data))
         break;
       *file_found = MatchesMask(mask_str, meta_data.name);
     }
   } else {
-    *file_found = enum_context->directory.first.listing->GetChildAndIncrementItr(meta_data);
+    *file_found = enum_context->directory.listing->GetChildAndIncrementItr(meta_data);
   }
 
   if (*file_found) {
@@ -749,19 +727,9 @@ void CbfsDriveInUserSpace::CbFsSetAllocationSize(CallbackFileSystem *sender,
     if (file_context->meta_data->allocation_size != file_context->meta_data->end_of_file) {
       if (file_context->meta_data->allocation_size < static_cast<uint64_t>(allocation_size)) {
         int64_t additional_size(allocation_size - file_context->meta_data->allocation_size);
-        if (additional_size + g_cbfs_drive->used_space_ > g_cbfs_drive->max_space_) {
+        if (additional_size + g_cbfs_drive->UsedSpace() > g_cbfs_drive->MaxSpace()) {
           LOG(kError) << "CbFsSetAllocationSize: " << relative_path << ", not enough memory.";
           throw ECBFSError(ERROR_DISK_FULL);
-        } else {
-          g_cbfs_drive->used_space_ += additional_size;
-        }
-      } else if (file_context->meta_data->allocation_size >
-                 static_cast<uint64_t>(allocation_size)) {
-        int64_t reduced_size(file_context->meta_data->allocation_size - allocation_size);
-        if (g_cbfs_drive->used_space_ < reduced_size) {
-          g_cbfs_drive->used_space_ = 0;
-        } else {
-          g_cbfs_drive->used_space_ -= reduced_size;
         }
       }
       if (g_cbfs_drive->TruncateFile(file_context, allocation_size)) {
@@ -771,14 +739,6 @@ void CbfsDriveInUserSpace::CbFsSetAllocationSize(CallbackFileSystem *sender,
         }
       } else {
         LOG(kError) << "Truncate failed for " << file_context->meta_data->name.c_str();
-        if (file_context->meta_data->allocation_size < static_cast<uint64_t>(allocation_size)) {
-          int64_t additional_size(allocation_size - file_context->meta_data->allocation_size);
-            g_cbfs_drive->used_space_ -= additional_size;
-        } else if (file_context->meta_data->allocation_size >
-                   static_cast<uint64_t>(allocation_size)) {
-          int64_t reduced_size(file_context->meta_data->allocation_size - allocation_size);
-          g_cbfs_drive->used_space_ += reduced_size;
-        }
         return;
       }
       file_context->content_changed = true;
@@ -805,18 +765,9 @@ void CbfsDriveInUserSpace::CbFsSetEndOfFile(CallbackFileSystem *sender,
     if (file_context->meta_data->allocation_size != static_cast<uint64_t>(end_of_file)) {
       if (file_context->meta_data->allocation_size < static_cast<uint64_t>(end_of_file)) {
         int64_t additional_size(end_of_file - file_context->meta_data->allocation_size);
-        if (additional_size + g_cbfs_drive->used_space_ > g_cbfs_drive->max_space_) {
+        if (additional_size + g_cbfs_drive->UsedSpace() > g_cbfs_drive->MaxSpace()) {
           LOG(kError) << "CbFsSetEndOfFile: " << relative_path << ", not enough memory.";
           throw ECBFSError(ERROR_DISK_FULL);
-        } else {
-          g_cbfs_drive->used_space_ += additional_size;
-        }
-      } else if (file_context->meta_data->allocation_size > static_cast<uint64_t>(end_of_file)) {
-        int64_t reduced_size(file_context->meta_data->allocation_size - end_of_file);
-        if (g_cbfs_drive->used_space_ < reduced_size) {
-          g_cbfs_drive->used_space_ = 0;
-        } else {
-          g_cbfs_drive->used_space_ -= reduced_size;
         }
       }
       file_context->meta_data->allocation_size = end_of_file;
@@ -858,12 +809,8 @@ void CbfsDriveInUserSpace::CbFsCanFileBeDeleted(CallbackFileSystem *sender,
                                                 LPBOOL can_be_deleted) {
   fs::path relative_path(GetRelativePath(file_info));
   LOG(kInfo) << "CbFsCanFileBeDeleted - " << relative_path;
+  *can_be_deleted = true;
 
-  if (g_cbfs_drive->CanRemove(relative_path)) {
-    *can_be_deleted = true;
-  } else {
-    *can_be_deleted = false;
-  }
   UNREFERENCED_PARAMETER(sender);
   UNREFERENCED_PARAMETER(handle_info);
 }
@@ -878,12 +825,6 @@ void CbfsDriveInUserSpace::CbFsDeleteFile(CallbackFileSystem *sender, CbFsFileIn
   }
   catch(...) {
     throw ECBFSError(ERROR_FILE_NOT_FOUND);
-  }
-
-  if (!file_context->meta_data->directory_id) {
-    g_cbfs_drive->used_space_ -= file_context->meta_data->allocation_size;
-  } else {
-    g_cbfs_drive->used_space_ -= kDirectorySize;
   }
 
   g_cbfs_drive->drive_changed_signal_(g_cbfs_drive->mount_dir_ / relative_path,
@@ -915,7 +856,6 @@ void CbfsDriveInUserSpace::CbFsRenameOrMoveFile(CallbackFileSystem *sender,
   catch(...) {
     throw ECBFSError(ERROR_ACCESS_DENIED);
   }
-  g_cbfs_drive->used_space_ -= reclaimed_space;
 
   UNREFERENCED_PARAMETER(file_info);
   UNREFERENCED_PARAMETER(sender);
@@ -986,9 +926,8 @@ void CbfsDriveInUserSpace::CbFsIsDirectoryEmpty(CallbackFileSystem *sender,
                                                 LPBOOL is_empty) {
   LOG(kInfo) << "CbFsIsDirectoryEmpty - " << fs::path(file_name);
   try {
-    DirectoryListingHandler::DirectoryType
-        directory(g_cbfs_drive->directory_listing_handler_->GetFromPath(file_name));
-    *is_empty = directory.first.listing->empty();
+    DirectoryData directory(g_cbfs_drive->directory_listing_handler_->GetFromPath(file_name));
+    *is_empty = directory.listing->empty();
   }
   catch(...) {
     throw ECBFSError(ERROR_PATH_NOT_FOUND);
@@ -1049,7 +988,7 @@ void CbfsDriveInUserSpace::SetNewAttributes(FileContext *file_context,
     else
       file_context->meta_data->attributes = FILE_ATTRIBUTE_NORMAL;
     file_context->self_encryptor.reset(new encrypt::SelfEncryptor(
-        file_context->meta_data->data_map, client_nfs_, data_store_));
+        file_context->meta_data->data_map, data_store_));
     file_context->meta_data->end_of_file =
       file_context->meta_data->allocation_size =
       file_context->self_encryptor->size();

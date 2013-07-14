@@ -25,9 +25,9 @@ License.
 #include "maidsafe/common/test.h"
 #include "maidsafe/common/utils.h"
 
-// #include "maidsafe/data_store/data_store.h"
-#include "maidsafe/data_store/permanent_store.h"
-#include "maidsafe/nfs/nfs.h"
+#include "maidsafe/passport/detail/secure_string.h"
+
+#include "maidsafe/encrypt/drive_store.h"
 
 #ifdef WIN32
 #  include "maidsafe/drive/win_drive.h"
@@ -42,15 +42,13 @@ License.
 namespace fs = boost::filesystem;
 
 namespace maidsafe {
-
 namespace drive {
-
 namespace test {
 
 namespace {
 
 fs::path g_test_mirror, g_mount_dir;
-std::shared_ptr<DerivedDriveInUserSpace> g_drive;
+std::shared_ptr<DerivedDrive> g_drive;
 bool g_virtual_filesystem_test;
 passport::Maid* g_default_maid;
 
@@ -58,34 +56,22 @@ passport::Maid* g_default_maid;
 
 class ApiTestEnvironment : public testing::Environment {
  public:
-  // typedef data_store::DataStore<data_store::DataBuffer> DataStore;
-  typedef data_store::PermanentStore DataStore;
+  typedef maidsafe::drive_store::DriveStore DataStore;
 
   explicit ApiTestEnvironment(std::string test_directory)
       : root_test_dir_(new fs::path(test_directory)),
         main_test_dir_(maidsafe::test::CreateTestPath((*root_test_dir_).string())),
         virtual_filesystem_test_(test_directory == "MaidSafe_Test_Drive"),
-        default_maid_(GetSigner()),
-        routing_(default_maid_),
-        client_nfs_(routing_, default_maid_),
-        /*data_store_(MemoryUsage(0),
-                    DiskUsage(1073741824),
-                    DataStore::PopFunctor(),
-                    *main_test_dir_ / "local"),*/
         data_store_(*main_test_dir_ / "local", DiskUsage(1073741824)),
-        max_space_(1073741824),  // 2^30
-        used_space_(0),
-        unique_user_id_(Identity(crypto::Hash<crypto::SHA512>(main_test_dir_->string()))),
+        keyword_(RandomAlphaNumericString(64)),
+        pin_(std::string("12345")),
+        password_(RandomAlphaNumericString(64)),
 #ifdef WIN32
-        drive_(std::make_shared<DerivedDriveInUserSpace>(client_nfs_,
-                                                         data_store_,
-                                                         default_maid_,
-                                                         unique_user_id_,
-                                                         "",
-                                                         "S:",
-                                                         "MaidSafeDrive",
-                                                         max_space_,
-                                                         used_space_)) {}
+        drive_(std::make_shared<DerivedDrive>(data_store_,
+                                              "S:",
+                                              keyword_,
+                                              pin_,
+                                              password_)) {}
 #else
         drive_() {}
 #endif
@@ -117,44 +103,35 @@ class ApiTestEnvironment : public testing::Environment {
     fs::create_directories(g_test_mirror, error_code);
     ASSERT_EQ(0, error_code.value());
     if (virtual_filesystem_test_) {
-#ifdef WIN32
-      g_mount_dir /= "\\Owner";
-#else
-      drive_ = std::make_shared<DerivedDriveInUserSpace>(client_nfs_,
-                                                         data_store_,
-                                                         default_maid_,
-                                                         unique_user_id_,
-                                                         "",
-                                                         g_mount_dir,
-                                                         "MaidSafeDrive",
-                                                         max_space_,
-                                                         used_space_);
-      // TODO(Team): Find out why, if the mount is put on the asio service,
-      //             unmount hangs
-      boost::thread th(std::bind(&DerivedDriveInUserSpace::Mount, drive_));
-      if (!drive_->WaitUntilMounted()) {
-        LOG(kError) << "Drive failed to mount";
+#ifndef WIN32
+    drive_ = std::make_shared<DerivedDrive>(data_store_,
+                                            g_mount_dir,
+                                            keyword_,
+                                            pin_,
+                                            password_);
+    // TODO(Team): Find out why, if the mount is put on the asio service,
+    //             unmount hangs
+    boost::thread th(std::bind(&DerivedDriveInUserSpace::Mount, drive_));
+    if (!drive_->WaitUntilMounted()) {
+      LOG(kError) << "Drive failed to mount";
 //         asio_service_.Stop();
-        ASSERT_TRUE(false);
-      }
-      g_mount_dir /= "Owner";
+      ASSERT_TRUE(false);
+    }
+    g_mount_dir /= "Owner";
 #endif
     }
     g_drive = drive_;
     g_virtual_filesystem_test = virtual_filesystem_test_;
-    g_default_maid = &default_maid_;
   }
 
   void TearDown() {
     if (virtual_filesystem_test_) {
-      int64_t max_space, used_space;
 #ifdef WIN32
-      std::static_pointer_cast<DerivedDriveInUserSpace>(drive_)->Unmount(max_space, used_space);
+      std::static_pointer_cast<DerivedDrive>(drive_)->Unmount();
 #else
-      drive_->Unmount(max_space, used_space);
+      drive_->Unmount();
       drive_->WaitUntilUnMounted();
 #endif
-      BOOST_ASSERT(max_space == 1073741824);
     }
 //    g_drive.reset();
     main_test_dir_.reset();
@@ -171,13 +148,11 @@ class ApiTestEnvironment : public testing::Environment {
   maidsafe::test::TestPath root_test_dir_;
   maidsafe::test::TestPath main_test_dir_;
   bool virtual_filesystem_test_;
-  passport::Maid default_maid_;
-  routing::Routing routing_;
-  nfs::ClientMaidNfs client_nfs_;
   DataStore data_store_;
-  int64_t max_space_, used_space_;
-  Identity unique_user_id_;
-  std::shared_ptr<DerivedDriveInUserSpace> drive_;
+  passport::detail::Keyword keyword_;
+  passport::detail::Pin pin_;
+  passport::detail::Password password_;
+  std::shared_ptr<DerivedDrive> drive_;
 };
 
 class CallbacksApiTest : public testing::Test {
@@ -707,7 +682,7 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryToDriveThenDelete) {
   // Create a file in newly created directory...
   fs::path file(CreateTestFile(directory, file_size));
   // Check used space...
-  ASSERT_EQ(0, g_drive->GetUsedSpace());
+  ASSERT_EQ(0, g_drive->UsedSpace());
   // Copy directory and file to virtual drive...
   ASSERT_TRUE(CopyDirectories(directory, g_mount_dir));
   ASSERT_TRUE(fs::exists(g_mount_dir / directory.filename(), error_code));
@@ -717,7 +692,7 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryToDriveThenDelete) {
   // Check used space...
   ASSERT_EQ(CalculateUsedSpace(g_test_mirror), CalculateUsedSpace(g_mount_dir));
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
   // Delete the directory along with its contents...
   ASSERT_EQ(2U, fs::remove_all(g_mount_dir / directory.filename(), error_code));
   ASSERT_EQ(error_code.value(), 0);
@@ -725,8 +700,8 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryToDriveThenDelete) {
   ASSERT_NE(error_code.value(), 0);
   ASSERT_FALSE(fs::exists(g_mount_dir / directory.filename() / file.filename()));
   // Check used space...
-  ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-  ASSERT_EQ(0, g_drive->GetUsedSpace());
+  ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+  ASSERT_EQ(0, g_drive->UsedSpace());
 }
 
 TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryToDriveDeleteThenRecopy) {
@@ -742,7 +717,7 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryToDriveDeleteThenRecopy) {
   ASSERT_TRUE(fs::exists(g_mount_dir / directory.filename() / file.filename()));
   // Check used space...
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
   // Delete the directory along with its contents...
   boost::system::error_code error_code;
   ASSERT_EQ(2U, fs::remove_all(g_mount_dir / directory.filename(), error_code));
@@ -750,15 +725,15 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryToDriveDeleteThenRecopy) {
   ASSERT_FALSE(fs::exists(g_mount_dir / directory.filename()));
   ASSERT_FALSE(fs::exists(g_mount_dir / directory.filename() / file.filename()));
   // Check used space again...
-  ASSERT_EQ(0, g_drive->GetUsedSpace());
+  ASSERT_EQ(0, g_drive->UsedSpace());
   // Re-copy directory and file to virtual drive...
   ASSERT_TRUE(CopyDirectories(directory, g_mount_dir));
   ASSERT_TRUE(fs::exists(g_mount_dir / directory.filename()));
   ASSERT_TRUE(fs::exists(g_mount_dir / directory.filename() / file.filename()));
   // and again...
   if (g_virtual_filesystem_test) {
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-    ASSERT_EQ(file_size + kDirectorySize, g_drive->GetUsedSpace());
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(file_size + kDirectorySize, g_drive->UsedSpace());
   }
 }
 
@@ -780,7 +755,7 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryThenRename) {
   // Check used space...
   ASSERT_EQ(CalculateUsedSpace(g_test_mirror), CalculateUsedSpace(g_mount_dir));
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
   // Rename the directory...
   fs::path new_directory_name(g_mount_dir / maidsafe::RandomAlphaNumericString(5));
   fs::rename(g_mount_dir / directory.filename(), new_directory_name, error_code);
@@ -792,7 +767,7 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryThenRename) {
   // Check used space...
   ASSERT_EQ(file_size + kDirectorySize, CalculateUsedSpace(g_test_mirror));
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(file_size + kDirectorySize, g_drive->GetUsedSpace());
+    ASSERT_EQ(file_size + kDirectorySize, g_drive->UsedSpace());
 }
 
 TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryRenameThenRecopy) {
@@ -812,7 +787,7 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryRenameThenRecopy) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
   // Rename the directory...
   fs::path new_directory_name(g_mount_dir / maidsafe::RandomAlphaNumericString(5));
   fs::rename(g_mount_dir / directory.filename(), new_directory_name, error_code);
@@ -828,8 +803,8 @@ TEST_F(CallbacksApiTest, BEH_CopyNonemptyDirectoryRenameThenRecopy) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space again...
   if (g_virtual_filesystem_test) {
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-    ASSERT_EQ(2 * file_size + 2 * kDirectorySize, g_drive->GetUsedSpace());
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(2 * file_size + 2 * kDirectorySize, g_drive->UsedSpace());
   }
 }
 
@@ -845,7 +820,7 @@ TEST_F(CallbacksApiTest, FUNC_CopyDirectoryContainingFiles) {
   // Check used space...
   ASSERT_EQ(CalculateUsedSpace(g_test_mirror), CalculateUsedSpace(g_mount_dir));
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
 }
 
 TEST_F(CallbacksApiTest, FUNC_CopyDirectoryContainingFilesAndDirectories) {
@@ -859,7 +834,7 @@ TEST_F(CallbacksApiTest, FUNC_CopyDirectoryContainingFilesAndDirectories) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
 }
 
 TEST_F(CallbacksApiTest, FUNC_CopyFileThenCopyCopiedFile) {
@@ -884,8 +859,8 @@ TEST_F(CallbacksApiTest, FUNC_CopyFileThenCopyCopiedFile) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test) {
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-    ASSERT_EQ(file_size, g_drive->GetUsedSpace());
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(file_size, g_drive->UsedSpace());
   }
 }
 
@@ -913,8 +888,8 @@ TEST_F(CallbacksApiTest, FUNC_CopyFileDeleteThenRecopy) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test) {
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-    ASSERT_EQ(file_size, g_drive->GetUsedSpace());
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(file_size, g_drive->UsedSpace());
   }
 }
 
@@ -932,7 +907,7 @@ TEST_F(CallbacksApiTest, FUNC_CopyFileRenameThenRecopy) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
   // Rename the file...
   fs::path new_file_name(g_mount_dir / (RandomAlphaNumericString(5) + ".txt"));
   fs::rename(g_mount_dir / file.filename(), new_file_name, error_code);
@@ -948,7 +923,7 @@ TEST_F(CallbacksApiTest, FUNC_CopyFileRenameThenRecopy) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(2 * file_size, g_drive->GetUsedSpace());
+    ASSERT_EQ(2 * file_size, g_drive->UsedSpace());
 }
 
 TEST_F(CallbacksApiTest, BEH_CopyFileThenRead) {
@@ -973,7 +948,7 @@ TEST_F(CallbacksApiTest, BEH_CopyFileThenRead) {
   ASSERT_TRUE(CompareFileContents(test_file, file));
   // Check used space...
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
 }
 
 TEST_F(CallbacksApiTest, FUNC_CopyFileRenameThenRead) {
@@ -1046,8 +1021,8 @@ TEST_F(CallbacksApiTest, BEH_CreateFileOnDriveThenRead) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test) {
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-    ASSERT_EQ(file_size, g_drive->GetUsedSpace());
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(file_size, g_drive->UsedSpace());
   }
 }
 
@@ -1065,8 +1040,8 @@ TEST_F(CallbacksApiTest, BEH_CopyFileModifyThenRead) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space...
   if (g_virtual_filesystem_test) {
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-    ASSERT_EQ(file_size, g_drive->GetUsedSpace());
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(file_size, g_drive->UsedSpace());
   }
   // Modify the file...
   ASSERT_TRUE(ModifyFile(g_mount_dir / file.filename(), file_size));
@@ -1074,8 +1049,8 @@ TEST_F(CallbacksApiTest, BEH_CopyFileModifyThenRead) {
   ASSERT_EQ(error_code.value(), 0);
   // Check used space again...
   if (g_virtual_filesystem_test) {
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
-    ASSERT_EQ(file_size, g_drive->GetUsedSpace());
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(file_size, g_drive->UsedSpace());
   }
   // Write virtual drive file back to a disk file...
   fs::path test_file(g_test_mirror / (RandomAlphaNumericString(5) + ".txt"));
@@ -1201,7 +1176,7 @@ TEST_F(CallbacksApiTest, FUNC_FunctionalTest) {
   ASSERT_TRUE(DoRandomEvents());
   // Check used space...
   if (g_virtual_filesystem_test)
-    ASSERT_EQ(g_drive->GetUsedSpace(), CalculateUsedSpace(g_mount_dir));
+    ASSERT_EQ(g_drive->UsedSpace(), CalculateUsedSpace(g_mount_dir));
 }
 
 namespace {
@@ -1486,9 +1461,7 @@ TEST_F(CallbacksApiTest, BEH_GetAndInsertHiddenDataMap) {
 // }
 
 }  // namespace test
-
 }  // namespace drive
-
 }  // namespace maidsafe
 
 int main(int argc, char **argv) {

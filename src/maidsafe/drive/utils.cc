@@ -21,9 +21,12 @@ License.
 #include "maidsafe/common/log.h"
 #include "maidsafe/encrypt/self_encryptor.h"
 
+#include "maidsafe/passport/detail/passport.pb.h"
+
 #include "maidsafe/drive/directory_listing_handler.h"
 #include "maidsafe/drive/directory_listing.h"
 #include "maidsafe/drive/meta_data.h"
+#include "maidsafe/drive/proto_structs.pb.h"
 
 namespace maidsafe {
 
@@ -49,6 +52,67 @@ FileContext::FileContext(std::shared_ptr<MetaData> meta_data_in)
       content_changed(false),
       grandparent_directory_id(),
       parent_directory_id() {}
+
+
+Session::Session(const Identity& unique_user_id,
+                 const Identity& root_parent_id,
+                 const std::shared_ptr<passport::Maid>& maid)
+  : unique_user_id_(unique_user_id),
+    root_parent_id_(root_parent_id),
+    maid_(maid) {}
+
+Session::Session(const NonEmptyString& serialised_session)
+  : unique_user_id_(),
+    root_parent_id_(),
+    maid_() {
+  Parse(serialised_session);
+}
+
+NonEmptyString Session::Serialise() {
+  protobuf::Session proto_session;
+
+  proto_session.set_unique_user_id(unique_user_id_.string());
+  proto_session.set_root_parent_id(root_parent_id_.string());
+
+  passport::detail::protobuf::Passport proto_passport;
+  auto proto_fob(proto_passport.add_fob());
+  maid_->ToProtobuf(proto_fob);
+  proto_session.set_serialised_maid(proto_passport.SerializeAsString());
+  return NonEmptyString(proto_session.SerializeAsString());
+}
+
+Identity Session::unique_user_id() {
+  return unique_user_id_;
+}
+
+Identity Session::root_parent_id() {
+  return root_parent_id_;
+}
+
+std::shared_ptr<passport::Maid> Session::maid() {
+  return maid_;
+}
+
+void Session::Parse(const NonEmptyString& serialised_session) {
+  protobuf::Session proto_session;
+  if (!proto_session.ParseFromString(serialised_session.string()) ||
+      !proto_session.IsInitialized()) {
+    LOG(kError) << "Failed to parse session.";
+    ThrowError(CommonErrors::parsing_error);
+  }
+
+  unique_user_id_ = Identity(proto_session.unique_user_id());
+  root_parent_id_ = Identity(proto_session.root_parent_id());
+
+  passport::detail::protobuf::Passport proto_passport;
+  if (!proto_passport.ParseFromString(proto_session.serialised_maid()) ||
+      !proto_passport.IsInitialized()) {
+    LOG(kError) << "Failed to parse maid.";
+    ThrowError(CommonErrors::parsing_error);
+  }
+
+  maid_.reset(new passport::Maid(proto_passport.fob(0)));
+}
 
 #ifndef MAIDSAFE_WIN32
 // Not called by Windows...
