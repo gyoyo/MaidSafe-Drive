@@ -281,7 +281,7 @@ void DirectoryListingHandler::RenameSameParent(const fs::path& old_relative_path
 
 #ifndef MAIDSAFE_WIN32
   try {
-    grandparent.first.listing->UpdateChild(parent_meta_data, true);
+    grandparent.listing->UpdateChild(parent_meta_data, true);
   }
   catch(...) { /*Non-critical*/ }
   PutToStorage(grandparent);
@@ -360,7 +360,7 @@ void DirectoryListingHandler::RenameDifferentParent(const fs::path& old_relative
 
 #ifndef MAIDSAFE_WIN32
   try {
-    old_grandparent.first.listing->UpdateChild(old_parent_meta_data, true);
+    old_grandparent.listing->UpdateChild(old_parent_meta_data, true);
   }
   catch(...) { /*Non-critical*/ }
   PutToStorage(old_grandparent);

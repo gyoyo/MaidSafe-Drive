@@ -166,9 +166,9 @@ int main(int argc, char *argv[]) {
         ("help,H", "print this help message")
         ("chunkdir,C", po::value<std::string>(), "set directory to store chunks")
         ("mountdir,D", po::value<std::string>(), "set virtual drive name")
-        ("password,P", po::value<std::string>(), "password")
-        ("keyword,K", po::value<std::string>(), "keyword")
-        ("pin,I", po::value<std::string>(), "pin")
+        ("password,P", po::value<std::string>()->default_value(""), "password")
+        ("keyword,K", po::value<std::string>()->default_value(""), "keyword")
+        ("pin,I", po::value<std::string>()->default_value(""), "pin")
         ("checkdata", "check all data (metadata and chunks)")
         ("start", "start MaidSafeDrive (mount drive) [default]")
         ("stop", "stop MaidSafeDrive (unmount drive) [not implemented]"); // dunno if we can from here!
@@ -216,9 +216,6 @@ int main(int argc, char *argv[]) {
     fs::path mount_path(GetPathFromProgramOption("mountdir", &variables_map, true));
 #endif
 
-    Keyword keyword(GetUserInputFromProgramOption("keyword", &variables_map, true));
-    Pin pin(GetUserInputFromProgramOption("pin", &variables_map, true));
-    Password password(GetUserInputFromProgramOption("password", &variables_map, true));
 
     if (variables_map.count("stop")) {
       LOG(kInfo) << "Trying to stop.";
@@ -230,10 +227,27 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    if (keyword.string().empty() || pin.string().empty() || password.string().empty()) {
+    std::string keyword_str(GetUserInputFromProgramOption("keyword", &variables_map, true));
+    std::string pin_str(GetUserInputFromProgramOption("pin", &variables_map, true));
+    std::string password_str(GetUserInputFromProgramOption("password", &variables_map, true));
+
+    if (keyword_str.empty() || pin_str.empty() || password_str.empty()) {
+      std::cout << "Enter keyword" << std::endl;
+      getline(std::cin, keyword_str);
+      std::cout << "Enter pin" << std::endl;
+      getline(std::cin, pin_str);
+      std::cout << "Enter password" << std::endl;
+      getline(std::cin, password_str);
+    }
+
+    if (keyword_str.empty() || pin_str.empty() || password_str.empty()) {
       LOG(kWarning) << options_description;
       return 1;
     }
+
+    Keyword keyword(keyword_str);
+    Pin pin(pin_str);
+    Password password(password_str);
 
     int result(maidsafe::drive::Mount(mount_path, chunkstore_path, keyword, pin, password));
     return result;

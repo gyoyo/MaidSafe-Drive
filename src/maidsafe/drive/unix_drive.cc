@@ -81,27 +81,20 @@ static inline void SetFileContext(
 struct fuse_operations FuseDriveInUserSpace::maidsafe_ops_;
 const bool FuseDriveInUserSpace::kAllowMsHidden_(false);
 
-FuseDriveInUserSpace::FuseDriveInUserSpace(ClientNfs& client_nfs,
-                                           DataStore& data_store,
-                                           const Maid& maid,
-                                           const Identity& unique_user_id,
-                                           const std::string& root_parent_id,
-                                           const fs::path &mount_dir,
-                                           const fs::path &drive_name,
-                                           const int64_t &max_space,
-                                           const int64_t &used_space)
-        : DriveInUserSpace(client_nfs,
-                           data_store,
-                           maid,
-                           unique_user_id,
-                           root_parent_id,
+FuseDriveInUserSpace::FuseDriveInUserSpace(DataStore& data_store,
+                                           const fs::path& mount_dir,
+                                           const Keyword& keyword,
+                                           const Pin& pin,
+                                           const Password& password)
+        : DriveInUserSpace(data_store,
                            mount_dir,
-                           max_space,
-                           used_space),
+                           keyword,
+                           pin,
+                           password),
           fuse_(nullptr),
           fuse_channel_(nullptr),
           fuse_mountpoint_(nullptr),
-          drive_name_(drive_name.string()),
+          drive_name_("maidsafe_drive"),
           fuse_event_loop_thread_(),
           open_files_() {
   g_fuse_drive = this;
@@ -113,7 +106,7 @@ FuseDriveInUserSpace::FuseDriveInUserSpace(ClientNfs& client_nfs,
 }
 
 FuseDriveInUserSpace::~FuseDriveInUserSpace() {
-  Unmount(max_space_, used_space_);
+  Unmount(/*max_space_, used_space_*/);
 }
 
 int FuseDriveInUserSpace::Init() {
@@ -254,7 +247,7 @@ int FuseDriveInUserSpace::Mount() {
   return kSuccess;
 }
 
-bool FuseDriveInUserSpace::Unmount(int64_t &max_space, int64_t &used_space) {
+bool FuseDriveInUserSpace::Unmount() {
   if (drive_stage_ != kMounted) {
 //    LOG(kInfo) << "Not mounted at all;";
     return false;  // kUnmountError
@@ -263,8 +256,8 @@ bool FuseDriveInUserSpace::Unmount(int64_t &max_space, int64_t &used_space) {
   std::string command(g_fuse_drive->GetMountDir().string());
   boost::mutex::scoped_lock lock(g_fuse_drive->unmount_mutex_);
 #endif
-  max_space = max_space_;
-  used_space = used_space_;
+//  max_space = max_space_;
+//  used_space = used_space_;
   fuse_exit(fuse_);
 #ifdef MAIDSAFE_APPLE
   fuse_unmount(fuse_mountpoint_, fuse_channel_);
@@ -328,7 +321,6 @@ int FuseDriveInUserSpace::OpsCreate(const char *path,
     *data_map = *file_context->meta_data->data_map;
     file_context->meta_data->data_map = data_map;
     file_context->self_encryptor.reset(new encrypt::SelfEncryptor(file_context->meta_data->data_map,
-                                                                  g_fuse_drive->client_nfs_,
                                                                   g_fuse_drive->data_store_));
   }
 
@@ -528,7 +520,6 @@ int FuseDriveInUserSpace::OpsOpen(const char *path, struct fuse_file_info *file_
     if (!file_context->self_encryptor) {
       file_context->self_encryptor.reset(
           new encrypt::SelfEncryptor(file_context->meta_data->data_map,
-                                     g_fuse_drive->client_nfs_,
                                      g_fuse_drive->data_store_));
     }
   }
@@ -801,7 +792,6 @@ int FuseDriveInUserSpace::OpsWrite(const char *path,
   if (!file_context->self_encryptor) {
     LOG(kInfo) << "Resetting the encryption stream";
     file_context->self_encryptor.reset(new encrypt::SelfEncryptor(file_context->meta_data->data_map,
-                                                                  g_fuse_drive->client_nfs_,
                                                                   g_fuse_drive->data_store_));
   }
 
@@ -1073,9 +1063,9 @@ int FuseDriveInUserSpace::OpsReaddir(const char *path,
   filler(buf, "..", nullptr, 0);
   DirectoryListingPtr dir_listing;
   try {
-    DirectoryListingHandler::DirectoryType directory(
+    DirectoryData directory(
         g_fuse_drive->directory_listing_handler_->GetFromPath(fs::path(path)));
-    dir_listing = directory.first.listing;
+    dir_listing = directory.listing;
   } catch(...) {}
 
   if (!dir_listing) {
@@ -1485,7 +1475,6 @@ void FuseDriveInUserSpace::SetNewAttributes(FileContext *file_context,
       file_context->meta_data->attributes.st_mode = (0644 | S_IFREG);
     file_context->meta_data->attributes.st_nlink = 1;
     file_context->self_encryptor.reset(new encrypt::SelfEncryptor(file_context->meta_data->data_map,
-                                                                  client_nfs_,
                                                                   data_store_));
     file_context->meta_data->attributes.st_size = file_context->self_encryptor->size();
     file_context->meta_data->attributes.st_blocks =

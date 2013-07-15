@@ -52,15 +52,11 @@ namespace drive {
 
 class FuseDriveInUserSpace : public DriveInUserSpace {
  public:
-  FuseDriveInUserSpace(ClientNfs& client_nfs,
-                       DataStore& data_store,
-                       const Maid& maid,
-                       const Identity& unique_user_id,
-                       const std::string& root_parent_id,
+  FuseDriveInUserSpace(DataStore& data_store,
                        const fs::path &mount_dir,
-                       const fs::path &drive_name,
-                       const int64_t &max_space,
-                       const int64_t &used_space);
+                       const Keyword& keyword,
+                       const Pin& pin,
+                       const Password& password);
   virtual ~FuseDriveInUserSpace();
 
   // Assigns customised functions to file sysyem operations
@@ -68,7 +64,7 @@ class FuseDriveInUserSpace : public DriveInUserSpace {
   // Mounts the drive. Successful return means the drive is ready for IO operations
   virtual int Mount();
   // Unmount drive
-  virtual bool Unmount(int64_t &max_space, int64_t &used_space);
+  virtual bool Unmount();
   // Return drive's used space
   int64_t UsedSpace() const;
   // Notifies filesystem of name change
@@ -152,6 +148,7 @@ class FuseDriveInUserSpace : public DriveInUserSpace {
   boost::thread fuse_event_loop_thread_;
   std::multimap<fs::path, std::shared_ptr<FileContext>> open_files_;
   static const bool kAllowMsHidden_;
+  int64_t max_space_, used_space_; // FIXME (BRIAN)
 };
 
 }  // namespace drive
