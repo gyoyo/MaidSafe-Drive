@@ -241,7 +241,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (keyword_str.empty() || pin_str.empty() || password_str.empty()) {
-      LOG(kWarning) << options_description;
+      LOG(kError) << options_description;
       return 1;
     }
 
