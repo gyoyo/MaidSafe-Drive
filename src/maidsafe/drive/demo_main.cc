@@ -23,6 +23,7 @@ License.
 #include <string>
 #include <fstream>  // NOLINT
 #include <iterator>
+#include <signal.h>
 
 #include "boost/filesystem.hpp"
 #include "boost/program_options.hpp"
@@ -56,8 +57,14 @@ typedef CbfsDriveInUserSpace DemoDrive;
 typedef FuseDriveInUserSpace DemoDrive;
 #endif
 
-typedef std::unique_ptr<DemoDrive> DemoDrivePtr;
+typedef std::shared_ptr<DemoDrive> DemoDrivePtr;
+DemoDrivePtr g_drive_ptr;
 
+void ctrl_c_handler(int /*input*/) {
+  int64_t used_space, total_space;
+  g_drive_ptr->Unmount(total_space, used_space);
+  exit(1);
+}
 
 int Mount(const fs::path &mount_dir, const fs::path &chunk_dir) {
   fs::path data_store_path(chunk_dir / "store");
@@ -94,11 +101,15 @@ int Mount(const fs::path &mount_dir, const fs::path &chunk_dir) {
   if (first_run)
     BOOST_VERIFY(WriteFile(id_path, drive_in_user_space->root_parent_id()));
 
-#ifdef WIN32
-  drive_in_user_space->WaitUntilUnMounted();
-  // while (!kbhit());
-  drive_in_user_space->Unmount(max_space, used_space);
+#ifdef __GNUC__
+  std::thread thread([&]() { drive_in_user_space->Mount(); });
+  if (!drive_in_user_space->WaitUntilMounted()) {
+    LOG(kError) << "Drive failed to mount";
+    assert(false);
+  }
 #endif
+  g_drive_ptr = drive_in_user_space;
+  drive_in_user_space->WaitUntilUnMounted();
 
   return 0;
 }
@@ -145,6 +156,7 @@ fs::path GetPathFromProgramOption(const std::string &option_name,
 
 
 int main(int argc, char *argv[]) {
+  signal (SIGINT, maidsafe::drive::ctrl_c_handler);
   maidsafe::log::Logging::Instance().Initialise(argc, argv);
   boost::system::error_code error_code;
 #ifdef WIN32
