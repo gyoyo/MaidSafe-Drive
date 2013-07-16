@@ -272,10 +272,6 @@ bool FuseDriveInUserSpace::Unmount() {
   return true;  // kSuccess
 }
 
-int64_t FuseDriveInUserSpace::UsedSpace() const {
-  return used_space_;
-}
-
 /********************************* content ************************************/
 
 int FuseDriveInUserSpace::OpsCreate(const char *path,
@@ -371,18 +367,9 @@ int FuseDriveInUserSpace::OpsFtruncate(const char *path,
   if (g_fuse_drive->TruncateFile(file_context, size)) {
     if (file_context->meta_data->attributes.st_size < size) {
       int64_t additional_size(size - file_context->meta_data->attributes.st_size);
-      if (additional_size + g_fuse_drive->used_space_ > g_fuse_drive->max_space_) {
+      if (additional_size + g_fuse_drive->UsedSpace() > g_fuse_drive->MaxSpace()) {
         LOG(kError) << "OpsTruncate: " << path << ", not enough memory.";
         return -ENOSPC;
-      } else {
-        g_fuse_drive->used_space_ += additional_size;
-      }
-    } else if (file_context->meta_data->attributes.st_size > size) {
-      int64_t reduced_size(file_context->meta_data->attributes.st_size - size);
-      if (g_fuse_drive->used_space_ < reduced_size) {
-        g_fuse_drive->used_space_ = 0;
-      } else {
-        g_fuse_drive->used_space_ -= reduced_size;
       }
     }
     file_context->meta_data->attributes.st_size = size;
@@ -420,7 +407,7 @@ int FuseDriveInUserSpace::OpsMkdir(const char *path, mode_t mode) {
     return -EIO;
   }
 
-  g_fuse_drive->used_space_ += kDirectorySize;
+//  g_fuse_drive->used_space_ += kDirectorySize;
   g_fuse_drive->drive_changed_signal_(g_fuse_drive->mount_dir_ / full_path, fs::path(), kCreated);
   return 0;
 }
@@ -460,7 +447,7 @@ int FuseDriveInUserSpace::OpsMknod(const char *path, mode_t mode, dev_t rdev) {
   }
 
   meta_data.attributes.st_size = kDirectorySize;
-  g_fuse_drive->used_space_ += kDirectorySize;
+//  g_fuse_drive->used_space_ += kDirectorySize;
 
   g_fuse_drive->drive_changed_signal_(g_fuse_drive->mount_dir_ / full_path, fs::path(), kCreated);
 
@@ -650,7 +637,7 @@ int FuseDriveInUserSpace::OpsRmdir(const char *path) {
     return -ENOENT;
   }
 
-  g_fuse_drive->used_space_ -= meta_data.attributes.st_size;
+//  g_fuse_drive->used_space_ -= meta_data.attributes.st_size;
 
   try {
     g_fuse_drive->RemoveFile(path);
@@ -680,19 +667,19 @@ int FuseDriveInUserSpace::OpsTruncate(const char *path, off_t size) {
       if (g_fuse_drive->TruncateFile(file_context, size)) {
         if (file_context->meta_data->attributes.st_size < size) {
           int64_t additional_size(size - file_context->meta_data->attributes.st_size);
-          if (additional_size + g_fuse_drive->used_space_ > g_fuse_drive->max_space_) {
+          if (additional_size + g_fuse_drive->UsedSpace() > g_fuse_drive->MaxSpace()) {
             LOG(kError) << "OpsTruncate: " << path << ", not enough memory.";
             return -ENOSPC;
           } else {
-            g_fuse_drive->used_space_ += additional_size;
+//            g_fuse_drive->used_space_ += additional_size;
           }
         } else if (file_context->meta_data->attributes.st_size > size) {
-          int64_t reduced_size(file_context->meta_data->attributes.st_size - size);
-          if (g_fuse_drive->used_space_ < reduced_size) {
-            g_fuse_drive->used_space_ = 0;
-          } else {
-            g_fuse_drive->used_space_ -= reduced_size;
-          }
+//          int64_t reduced_size(file_context->meta_data->attributes.st_size - size);
+//          if (g_fuse_drive->used_space_ < reduced_size) {
+//            g_fuse_drive->used_space_ = 0;
+//          } else {
+//            g_fuse_drive->used_space_ -= reduced_size;
+//          }
         }
         file_context->meta_data->attributes.st_size = size;
         time(&file_context->meta_data->attributes.st_mtime);
@@ -723,19 +710,19 @@ int FuseDriveInUserSpace::OpsTruncate(const char *path, off_t size) {
     if (g_fuse_drive->TruncateFile(&file_context, size)) {
       if (file_context.meta_data->attributes.st_size < size) {
         int64_t additional_size(size - file_context.meta_data->attributes.st_size);
-        if (additional_size + g_fuse_drive->used_space_ > g_fuse_drive->max_space_) {
+        if (additional_size + g_fuse_drive->UsedSpace() > g_fuse_drive->MaxSpace()) {
           LOG(kError) << "OpsTruncate: " << path << ", not enough memory.";
           return -ENOSPC;
         } else {
-          g_fuse_drive->used_space_ += additional_size;
+//          g_fuse_drive->used_space_ += additional_size;
         }
       } else if (file_context.meta_data->attributes.st_size > size) {
-        int64_t reduced_size(file_context.meta_data->attributes.st_size - size);
-        if (g_fuse_drive->used_space_ < reduced_size) {
-          g_fuse_drive->used_space_ = 0;
-        } else {
-          g_fuse_drive->used_space_ -= reduced_size;
-        }
+//        int64_t reduced_size(file_context.meta_data->attributes.st_size - size);
+//        if (g_fuse_drive->used_space_ < reduced_size) {
+//          g_fuse_drive->used_space_ = 0;
+//        } else {
+//          g_fuse_drive->used_space_ -= reduced_size;
+//        }
       }
       file_context.meta_data->attributes.st_size = size;
       time(&file_context.meta_data->attributes.st_mtime);
@@ -771,7 +758,7 @@ int FuseDriveInUserSpace::OpsUnlink(const char *path) {
     return -EIO;
   }
 
-  g_fuse_drive->used_space_ -= temp_meta.attributes.st_size;
+//  g_fuse_drive->used_space_ -= temp_meta.attributes.st_size;
   g_fuse_drive->drive_changed_signal_(g_fuse_drive->mount_dir_ / path, fs::path(), kRemoved);
 
   return 0;
@@ -818,11 +805,11 @@ int FuseDriveInUserSpace::OpsWrite(const char *path,
                             file_context->meta_data->attributes.st_size));
   if (file_context->meta_data->attributes.st_size != max_size) {
     int64_t additional_size(max_size - file_context->meta_data->attributes.st_size);
-    if (additional_size + g_fuse_drive->used_space_ > g_fuse_drive->max_space_) {
+    if (additional_size + g_fuse_drive->UsedSpace() > g_fuse_drive->MaxSpace()) {
       LOG(kError) << "OpsWrite: " << path << ", not enough memory.";
       return -ENOSPC;
     } else {
-      g_fuse_drive->used_space_ += additional_size;
+//      g_fuse_drive->used_space_ += additional_size;
     }
     file_context->meta_data->attributes.st_size = max_size;
   }
@@ -1176,7 +1163,7 @@ int FuseDriveInUserSpace::OpsRename(const char *old_name, const char *new_name) 
 //     }
     return -EIO;
   }
-  g_fuse_drive->used_space_ -= reclaimed_space;
+//  g_fuse_drive->used_space_ -= reclaimed_space;
   RenameOpenContexts(old_path.string(), new_path.string());
 
   g_fuse_drive->drive_changed_signal_(g_fuse_drive->mount_dir_ / old_path,
@@ -1197,7 +1184,7 @@ int FuseDriveInUserSpace::OpsStatfs(const char *path, struct statvfs *stbuf) {
 
   stbuf->f_bsize = 4096;
   stbuf->f_frsize = 4096;
-  if (g_fuse_drive->max_space_ == 0) {
+  if (g_fuse_drive->MaxSpace() == 0) {
   // for future ref 2^45 = 35184372088832 = 32TB
 #ifndef __USE_FILE_OFFSET64
     stbuf->f_blocks = 8796093022208 / stbuf->f_frsize;
@@ -1207,8 +1194,8 @@ int FuseDriveInUserSpace::OpsStatfs(const char *path, struct statvfs *stbuf) {
     stbuf->f_bfree = 8796093022208 / stbuf->f_bsize;
 #endif
   } else {
-    stbuf->f_blocks = g_fuse_drive->max_space_ / stbuf->f_frsize;
-    stbuf->f_bfree = (g_fuse_drive->max_space_ - g_fuse_drive->used_space_) / stbuf->f_bsize;
+      stbuf->f_blocks = g_fuse_drive->MaxSpace() / stbuf->f_frsize;
+      stbuf->f_bfree = (g_fuse_drive->MaxSpace() - g_fuse_drive->UsedSpace()) / stbuf->f_bsize;
   }
   stbuf->f_bavail = stbuf->f_bfree;
 

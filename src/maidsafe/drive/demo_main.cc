@@ -141,14 +141,14 @@ std::string GetUserInputFromProgramOption(const std::string &option_name,
     std::string option(variables_map->at(option_name).as<std::string>());
     if (must_exist) {
       if (option.empty()) {
-        LOG(kError) << "Invalid " << option_name << " option.  " << option << " empty.";
+        //LOG(kError) << "Invalid " << option_name << " option.  " << option << " empty.";
         return std::string();
       }
     }
     // LOG(kInfo) << option_name << " set to " << option;
     return option;
   } else {
-    LOG(kWarning) << "You must set the " << option_name << " option to a non-empty string.";
+    //LOG(kWarning) << "You must set the " << option_name << " option to a non-empty string.";
     return std::string();
   }
 }

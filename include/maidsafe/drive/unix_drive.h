@@ -66,7 +66,7 @@ class FuseDriveInUserSpace : public DriveInUserSpace {
   // Unmount drive
   virtual bool Unmount();
   // Return drive's used space
-  int64_t UsedSpace() const;
+//  int64_t UsedSpace() const;
   // Notifies filesystem of name change
   virtual void NotifyRename(const fs::path& from_relative_path,
                             const fs::path& to_relative_path) const;
@@ -148,7 +148,6 @@ class FuseDriveInUserSpace : public DriveInUserSpace {
   boost::thread fuse_event_loop_thread_;
   std::multimap<fs::path, std::shared_ptr<FileContext>> open_files_;
   static const bool kAllowMsHidden_;
-  int64_t max_space_, used_space_; // FIXME (BRIAN)
 };
 
 }  // namespace drive
