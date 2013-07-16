@@ -57,7 +57,7 @@ typedef FuseDriveInUserSpace DemoDrive;
 
 typedef std::unique_ptr<DemoDrive> DemoDrivePtr;
 
-int Mount(const fs::path &mount_dir,
+int Mount(fs::path &mount_dir,
           const fs::path &chunk_dir,
           const Keyword& keyword,
           const Pin& pin,
@@ -70,6 +70,20 @@ int Mount(const fs::path &mount_dir,
   if (!fs::exists(chunk_dir, error_code))
     return error_code.value();
 
+#ifdef WIN32
+  std::uint32_t drive_letters, mask = 0x4, count = 2;
+  drive_letters = GetLogicalDrives();
+  while ((drive_letters & mask) != 0) {
+    mask <<= 1;
+    ++count;
+  }
+  if (count > 25) {
+    LOG(kError) << "No available drive letters.";
+    return 1;
+  }
+  char drive_name[3] = {'A' + static_cast<char>(count), ':', '\0'};
+  mount_dir = fs::path(std::string(drive_name));
+#endif
   DemoDrivePtr drive(new DemoDrive(data_store, mount_dir, keyword, pin, password));
 
 #ifdef WIN32
@@ -143,9 +157,9 @@ int main(int argc, char *argv[]) {
   maidsafe::log::Logging::Instance().Initialise(argc, argv);
   boost::system::error_code error_code;
 #ifdef WIN32
-  fs::path logging_dir("C:\\ProgramData\\MaidSafeDrive\\logs");
+  fs::path logging_dir(maidsafe::GetSystemAppSupportDir().parent_path().parent_path() / "MaidSafe\\CloudEncryptor\\logs");
 #else
-  fs::path logging_dir(fs::temp_directory_path(error_code) / "maidsafe_drive/logs");
+  fs::path logging_dir(fs::temp_directory_path(error_code) / "MaidSafe/CloudEncryptor/logs");
   if (error_code) {
     LOG(kError) << error_code.message();
     return 1;
@@ -157,7 +171,7 @@ int main(int argc, char *argv[]) {
     LOG(kError) << error_code.message();
   if (!fs::exists(logging_dir, error_code))
     LOG(kError) << "Couldn't create logging directory at " << logging_dir;
-  fs::path log_path(logging_dir / "maidsafe_drive");
+  fs::path log_path(logging_dir / "CloudEncryptor");
   // All command line parameters are only for this run. To allow persistance, update the config
   // file. Command line overrides any config file settings.
   try {
@@ -183,17 +197,18 @@ int main(int argc, char *argv[]) {
     config_file_options.add(options_description);
 
     // try open some config options
-    std::ifstream local_config_file("maidsafe_drive.conf");
+    std::ifstream local_config_file("cloud_encryptor.conf");
 #ifdef WIN32
-    fs::path main_config_path("C:/ProgramData/MaidSafeDrive/maidsafe_drive.conf");
+    fs::path main_config_path(maidsafe::GetSystemAppSupportDir().parent_path().parent_path()
+                                / "MaidSafe/CloudEncryptor/cloud_encryptor.conf");
 #else
-    fs::path main_config_path("/etc/maidsafe_drive.conf");
+    fs::path main_config_path("/etc/cloud_encryptor.conf");
 #endif
     std::ifstream main_config_file(main_config_path.string().c_str());
 
     // try local first for testing
     if (local_config_file) {
-      LOG(kInfo) << "Using local config file \"maidsafe_drive.conf\"";
+      LOG(kInfo) << "Using local config file \"cloud_encryptor.conf\"";
       store(parse_config_file(local_config_file, config_file_options), variables_map);
       notify(variables_map);
     } else if (main_config_file) {
@@ -222,10 +237,16 @@ int main(int argc, char *argv[]) {
       return 0;
     }
 
-    if (chunkstore_path == fs::path() || mount_path == fs::path()) {
+    if (chunkstore_path == fs::path()) {
       LOG(kWarning) << options_description;
       return 1;
     }
+#ifndef WIN32
+    if (mount_path == fs::path()) {
+      LOG(kWarning) << options_description;
+      return 1;
+    }
+#endif
 
     std::string keyword_str(GetUserInputFromProgramOption("keyword", &variables_map, true));
     std::string pin_str(GetUserInputFromProgramOption("pin", &variables_map, true));
@@ -254,7 +275,7 @@ int main(int argc, char *argv[]) {
   }
   catch(const std::exception& e) {
     LOG(kError) << "Exception: " << e.what();
-    return 1;
+    // return 1;
   }
   catch(...) {
     LOG(kError) << "Exception of unknown type!";

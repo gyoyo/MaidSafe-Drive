@@ -147,3 +147,18 @@ if(MaidsafeTesting)
   add_project_experimental()
   test_summary_output()
 endif()
+
+# Set Application Version
+set(CPACK_PACKAGE_VERSION_MAJOR ${ApplicationVersionMajor})
+set(CPACK_PACKAGE_VERSION_MINOR ${ApplicationVersionMinor})
+set(CPACK_PACKAGE_VERSION_PATCH ${ApplicationVersionPatch})
+
+set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+
+#==================================================================================================#
+# Installer                                                                                        #
+#==================================================================================================#
+if(${PACKAGE_BUILD})
+  include(${CMAKE_SOURCE_DIR}/cmake_modules/lifestuff_package.cmake)
+  include(CPack)
+endif()
