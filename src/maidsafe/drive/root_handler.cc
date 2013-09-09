@@ -268,16 +268,22 @@ bool RootHandler<data_store::SureFileStore>::CanRename(
 
 template<>
 void RootHandler<nfs_client::MaidNodeNfs>::Put(const boost::filesystem::path& /*path*/,
-                                               Directory& directory) const {
+                                               Directory& directory) {
   PutToStorage(*default_storage_, directory);
 }
 
 template<>
 void RootHandler<data_store::SureFileStore>::Put(const boost::filesystem::path& path,
-                                                 Directory& directory) const {
+                                                 Directory& directory) {
   auto directory_handler(GetHandler(path));
   if (directory_handler)
     PutToStorage(*directory_handler->storage(), directory);
+
+  auto itr(cached_directory_.find(path));
+  if (itr != std::end(cached_directory_))
+    cached_directory_.erase(itr);
+
+  cached_directory_.insert(std::make_pair(path, directory));
 }
 
 template<>

@@ -116,7 +116,7 @@ class RootHandler {
   void ReStoreDirectories(const boost::filesystem::path& old_path,
                           const boost::filesystem::path& new_path);
 
-  void Put(const boost::filesystem::path& path, Directory& directory) const;
+  void Put(const boost::filesystem::path& path, Directory& directory);
   void Delete(const boost::filesystem::path& path, const Directory& directory) const;
 
   std::shared_ptr<Storage> default_storage_;  // MaidNodeNfs or nullptr
@@ -125,6 +125,7 @@ class RootHandler {
   Directory root_;
   MetaData root_meta_data_;
   std::map<boost::filesystem::path, DirectoryHandler<Storage>> directory_handlers_;
+  std::map<boost::filesystem::path, Directory> cached_directory_;
   OnServiceAdded on_service_added_;
   OnServiceRemoved on_service_removed_;
   OnServiceRenamed on_service_renamed_;
@@ -157,6 +158,7 @@ RootHandler<Storage>::RootHandler(std::shared_ptr<nfs_client::MaidNodeNfs> maid_
       root_(),
       root_meta_data_(kRoot, true),
       directory_handlers_(),
+      cached_directory_(),
       on_service_added_(on_service_added),
       on_service_removed_(nullptr),
       on_service_renamed_(nullptr) {
@@ -175,6 +177,7 @@ RootHandler<Storage>::RootHandler(const Identity& drive_root_id,
       root_(),
       root_meta_data_(kRoot, true),
       directory_handlers_(),
+      cached_directory_(),
       on_service_added_(on_service_added),
       on_service_removed_(on_service_removed),
       on_service_renamed_(on_service_renamed) {
@@ -234,7 +237,6 @@ DataTagValue RootHandler<data_store::SureFileStore>::GetDirectoryType(
 template<typename Storage>
 FileContext<Storage> RootHandler<Storage>::GetFileContext(
     const boost::filesystem::path& path) const {
-  auto dir_handler(GetHandler(path));
   FileContext<Storage> file_context;
   Directory parent;
   {
@@ -242,8 +244,16 @@ FileContext<Storage> RootHandler<Storage>::GetFileContext(
     parent = root_;
     *file_context.meta_data = root_meta_data_;
   }
-  if (dir_handler)
-    parent = dir_handler->GetFromPath(parent, path.parent_path());
+
+  auto itr(cached_directory_.find(path.parent_path()));
+  if (itr != std::end(cached_directory_)) {
+    parent = itr->second;
+  } else {
+    auto dir_handler(GetHandler(path));
+    if (dir_handler)
+      parent = dir_handler->GetFromPath(parent, path.parent_path());
+  }
+
   if (path != kRoot)
     parent.listing->GetChild(path.filename(), *file_context.meta_data);
   file_context.grandparent_directory_id = parent.parent_id;
@@ -254,6 +264,10 @@ FileContext<Storage> RootHandler<Storage>::GetFileContext(
 
 template<typename Storage>
 Directory RootHandler<Storage>::GetFromPath(const boost::filesystem::path& path) const {
+  auto itr(cached_directory_.find(path));
+  if (itr != std::end(cached_directory_))
+    return itr->second;
+
   auto directory_handler(GetHandler(path));
   Directory root_copy;
   {
@@ -440,6 +454,10 @@ void RootHandler<Storage>::DeleteElement(const boost::filesystem::path& path, Me
   Put(path.parent_path().parent_path(), grandparent);
 #endif
   Put(path.parent_path(), parent);
+
+  auto itr(cached_directory_.find(path));
+  if (itr != std::end(cached_directory_))
+    cached_directory_.erase(itr);
 }
 
 template<>
@@ -657,11 +675,11 @@ void RootHandler<Storage>::UpdateParentDirectoryListing(const boost::filesystem:
 
 template<>
 void RootHandler<nfs_client::MaidNodeNfs>::Put(const boost::filesystem::path& path,
-                                               Directory& directory) const;
+                                               Directory& directory);
 
 template<>
 void RootHandler<data_store::SureFileStore>::Put(const boost::filesystem::path& path,
-                                                 Directory& directory) const;
+                                                 Directory& directory);
 
 template<>
 void RootHandler<nfs_client::MaidNodeNfs>::Delete(const boost::filesystem::path& path,
